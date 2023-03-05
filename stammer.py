@@ -67,7 +67,7 @@ def main():
         source_is_video = True
         print("Separating video frames")
         system("mkdir temp/frames")
-        system(f"ffmpeg -loglevel error -i {source_filename} temp/frames/frame%04d.png")
+        system(f"ffmpeg -loglevel error -i {source_filename} temp/frames/frame%06d.png")
         source_duration = popen(f"ffprobe -i {source_filename} -show_entries format=duration -v quiet -of csv='p=0'").read()
         source_framecount = popen(f"ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -print_format csv='p=0' {source_filename}").read()
 
@@ -111,13 +111,16 @@ def main():
     for i in range(len(dest_frames)):
         source_frame = source_frames[best_matches[i]]
         dest_frame = dest_frames[i]
-        dest_frame_amp = np.sum(dest_frame*dest_frame)
-        source_frame_amp = np.sum(source_frame*source_frame)
+        dest_frame_amp = np.sqrt(np.sum(dest_frame*dest_frame))
+        source_frame_amp = np.sqrt(np.sum(source_frame*source_frame))
         if (source_frame_amp == 0):
-            print("Source frame amp 0?")
             continue
         rescaled_frame = source_frame * (dest_frame_amp / source_frame_amp)
+
+        if (max(abs(rescaled_frame))) > 1:
+            rescaled_frame /= max(abs(rescaled_frame))
         output_audio[i*samples_per_frame : i*samples_per_frame + samples_per_frame*2] += rescaled_frame
+
 
     wavfile.write('temp/out.wav',fs, output_audio)
 
@@ -125,7 +128,7 @@ def main():
         print("building output video")
         system(f"mkdir temp/outframes")
         for i, match_num in enumerate(best_matches):
-            system(f"cp temp/frames/frame{match_num+1:04d}.png temp/outframes/frame{i:04d}.png")
+            system(f"cp temp/frames/frame{match_num+1:06d}.png temp/outframes/frame{i:06d}.png")
         system(f"ffmpeg -hide_banner -loglevel error -y -framerate {1/frame_length} -pattern_type glob -i 'temp/outframes/*.png' -i temp/out.wav -c:a aac -shortest -c:v libx264 -pix_fmt yuv420p {output_filename}")
     else:
         system(f"ffmpeg -i temp/out.wav {output_filename}")
