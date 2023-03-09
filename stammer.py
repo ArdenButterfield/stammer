@@ -1,9 +1,14 @@
 import numpy as np
 from scipy.io import wavfile
-from os import system, popen
+import os
 import sys
 
 DEFAULT_FRAME_LENGTH = 1/25 # Seconds
+
+COPY = "1>NUL copy" if os.name == "nt" else "cp"
+DEL = "rmdir /s /q" if os.name == "nt" else "rm -rf"
+SLASH = "\\" if os.name == "nt" else "/"
+APOS = "" if os.name == "nt" else "'"
 
 BAND_WIDTH = 1.2
 
@@ -55,10 +60,10 @@ def main():
     source_filename = sys.argv[1]
     destination_filename = sys.argv[2]
     output_filename = sys.argv[3]
-    system("mkdir temp")
+    os.system("mkdir temp")
 
-    source_type = popen(f"ffprobe -loglevel error -show_entries stream=codec_type -of csv=p=0 {source_filename}").read()
-    dest_type = popen(f"ffprobe -loglevel error -show_entries stream=codec_type -of csv=p=0 {destination_filename}").read()
+    source_type = os.popen(f"ffprobe -loglevel error -show_entries stream=codec_type -of csv=p=0 {source_filename}").read()
+    dest_type = os.popen(f"ffprobe -loglevel error -show_entries stream=codec_type -of csv=p=0 {destination_filename}").read()
 
     source_is_video = False
     frame_length = DEFAULT_FRAME_LENGTH
@@ -66,10 +71,10 @@ def main():
     if 'video' in source_type:
         source_is_video = True
         print("Separating video frames")
-        system("mkdir temp/frames")
-        system(f"ffmpeg -loglevel error -i {source_filename} temp/frames/frame%06d.png")
-        source_duration = popen(f"ffprobe -i {source_filename} -show_entries format=duration -v quiet -of csv='p=0'").read()
-        source_framecount = popen(f"ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -print_format csv='p=0' {source_filename}").read()
+        os.system(f"mkdir temp{SLASH}frames")
+        os.system(f"ffmpeg -loglevel error -i {source_filename} temp{SLASH}frames{SLASH}frame%06d.png")
+        source_duration = os.popen(f"ffprobe -i {source_filename} -show_entries format=duration -v quiet -of csv={APOS}p=0{APOS}").read()
+        source_framecount = os.popen(f"ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -print_format csv={APOS}p=0{APOS} {source_filename}").read()
 
         source_duration = float(source_duration)
         source_framecount = float(source_framecount)
@@ -84,12 +89,12 @@ def main():
         return
 
     print("copying audio")
-    system(f"ffmpeg -loglevel error -i {source_filename} -ac 1 -ar 44100 temp/src.wav")
-    system(f"ffmpeg -loglevel error -i {destination_filename} -ac 1 -ar 44100 temp/dest.wav")
+    os.system(f"ffmpeg -loglevel error -i {source_filename} -ac 1 -ar 44100 temp{SLASH}src.wav")
+    os.system(f"ffmpeg -loglevel error -i {destination_filename} -ac 1 -ar 44100 temp{SLASH}dest.wav")
 
     print("reading audio")
-    fs, source_audio = wavfile.read('temp/src.wav')
-    fs, dest_audio = wavfile.read('temp/dest.wav')
+    fs, source_audio = wavfile.read(f'temp{SLASH}src.wav')
+    fs, dest_audio = wavfile.read(f'temp{SLASH}dest.wav')
 
     print("analyzing audio")
     samples_per_frame = int(frame_length * fs)
@@ -122,18 +127,24 @@ def main():
         output_audio[i*samples_per_frame : i*samples_per_frame + samples_per_frame*2] += rescaled_frame
 
 
-    wavfile.write('temp/out.wav',fs, output_audio)
+    wavfile.write(f'temp{SLASH}out.wav',fs, output_audio)
 
     if source_is_video:
         print("building output video")
-        system(f"mkdir temp/outframes")
+        os.system(f"mkdir temp{SLASH}outframes")
         for i, match_num in enumerate(best_matches):
-            system(f"cp temp/frames/frame{match_num+1:06d}.png temp/outframes/frame{i:06d}.png")
-        system(f"ffmpeg -hide_banner -loglevel error -y -framerate {1/frame_length} -pattern_type glob -i 'temp/outframes/*.png' -i temp/out.wav -c:a aac -shortest -c:v libx264 -pix_fmt yuv420p {output_filename}")
+            os.system(f"{COPY} temp{SLASH}frames{SLASH}frame{match_num+1:06d}.png temp{SLASH}outframes{SLASH}frame{i:06d}.png")
+        input_cmd = f"-i temp\\outframes\\frame%06d.png" if os.name == "nt" else f"-pattern_type glob -i {APOS}temp{SLASH}outframes{SLASH}*.png{APOS}"
+        os.system(f"ffmpeg -hide_banner -loglevel error -y -framerate {1/frame_length} {input_cmd} -i temp{SLASH}out.wav -c:a aac -shortest -c:v libx264 -pix_fmt yuv420p {output_filename}")
     else:
-        system(f"ffmpeg -i temp/out.wav {output_filename}")
+        os.system(f"ffmpeg -i temp{SLASH}out.wav {output_filename}")
 
 
 if __name__ == '__main__':
-    main()
-    system("rm -rf temp")
+    try:
+        main()
+    except Exception:
+        os.system(f"{DEL} temp")
+        raise
+    finally:
+        os.system(f"{DEL} temp")
