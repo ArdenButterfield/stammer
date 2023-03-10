@@ -26,8 +26,6 @@ python stammer.py <carrier track> <modulator track> <ouptut file>
 
 where `<carrier track>` is the path to an audio or video file that frames will be taken from (i.e. Steamed Hams in the above example), `<modulator track>` is the path to an audio or video file that will be reconstructed using the carrier track, and `<output file>` is a path to file that will be written to. `<output file>` should have an audio or video file extension (such as `.wav`, `.mp3`, `.mp4`, etc).
 
-Note that because of its use of os command line calls, this program does not currently work for Windows computers.
-
 ## Why and How
 
 For several years, making increasingly outlandish edits of the skit "Steamed Hams" from *The Simpsons* has been a [trend online](https://knowyourmeme.com/memes/steamed-hams). This project was primarily inspired by an edit of "Steamed Hams" in which [the frames were sorted by pitch](https://www.youtube.com/watch?v=iWFRKZek0FI). It really is worth a listen: the choppy untintelligible vocals, steadily rising in pitch, builds tension in a strange way. Even chopped to the granularity of a frame, the music stabs and dialogue from the skit is still recognizable.
