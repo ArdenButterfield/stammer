@@ -1,14 +1,13 @@
 import numpy as np
 from scipy.io import wavfile
-import os
+from pathlib import Path
+import shutil
+import subprocess
 import sys
 
-DEFAULT_FRAME_LENGTH = 1/25 # Seconds
+TEMP_DIR = Path('temp')
 
-COPY = "1>NUL copy" if os.name == "nt" else "cp"
-DEL = "rmdir /s /q" if os.name == "nt" else "rm -rf"
-SLASH = "\\" if os.name == "nt" else "/"
-APOS = "" if os.name == "nt" else "'"
+DEFAULT_FRAME_LENGTH = 1/25 # Seconds
 
 BAND_WIDTH = 1.2
 
@@ -57,13 +56,35 @@ def main():
     if not len(sys.argv) in (4,):
         print("Usage: python stammer.py <carrier track> <modulator track> <ouptut file>")
         return
-    source_filename = sys.argv[1]
-    destination_filename = sys.argv[2]
-    output_filename = sys.argv[3]
-    os.system("mkdir temp")
+    source_filename = Path(sys.argv[1])
+    destination_filename = Path(sys.argv[2])
+    output_filename = Path(sys.argv[3])
+    TEMP_DIR.mkdir()
 
-    source_type = os.popen(f"ffprobe -loglevel error -show_entries stream=codec_type -of csv=p=0 {source_filename}").read()
-    dest_type = os.popen(f"ffprobe -loglevel error -show_entries stream=codec_type -of csv=p=0 {destination_filename}").read()
+    source_type = subprocess.run(
+        [
+            'ffprobe',
+            '-loglevel', 'error',
+            '-show_entries', 'stream=codec_type',
+            '-of', 'csv=p=0',
+            source_filename
+        ],
+        capture_output=True,
+        check=True,
+        text=True
+    ).stdout
+    dest_type = subprocess.run(
+        [
+            'ffprobe',
+            '-loglevel', 'error',
+            '-show_entries', 'stream=codec_type',
+            '-of', 'csv=p=0',
+            destination_filename
+        ],
+        capture_output=True,
+        check=True,
+        text=True
+    ).stdout
 
     source_is_video = False
     frame_length = DEFAULT_FRAME_LENGTH
@@ -71,10 +92,43 @@ def main():
     if 'video' in source_type:
         source_is_video = True
         print("Separating video frames")
-        os.system(f"mkdir temp{SLASH}frames")
-        os.system(f"ffmpeg -loglevel error -i {source_filename} temp{SLASH}frames{SLASH}frame%06d.png")
-        source_duration = os.popen(f"ffprobe -i {source_filename} -show_entries format=duration -v quiet -of csv={APOS}p=0{APOS}").read()
-        source_framecount = os.popen(f"ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -print_format csv={APOS}p=0{APOS} {source_filename}").read()
+        frames_dir = TEMP_DIR / 'frames'
+        frames_dir.mkdir()
+        subprocess.run(
+            [
+                'ffmpeg',
+                '-loglevel', 'error',
+                '-i', source_filename,
+                frames_dir / 'frame%06d.png'
+            ],
+            check=True
+        )
+        source_duration = subprocess.run(
+            [
+                'ffprobe',
+                '-i', source_filename,
+                '-show_entries', 'format=duration',
+                '-v', 'quiet',
+                '-of', 'csv=p=0'
+            ],
+            capture_output=True,
+            check=True,
+            text=True
+        ).stdout
+        source_framecount = subprocess.run(
+            [
+                'ffprobe',
+                '-v', 'error',
+                '-select_streams', 'v:0',
+                '-count_frames',
+                '-show_entries', 'stream=nb_read_frames',
+                '-print_format', 'csv=p=0',
+                source_filename
+            ],
+            capture_output=True,
+            check=True,
+            text=True
+        ).stdout
 
         source_duration = float(source_duration)
         source_framecount = float(source_framecount)
@@ -89,12 +143,32 @@ def main():
         return
 
     print("copying audio")
-    os.system(f"ffmpeg -loglevel error -i {source_filename} -ac 1 -ar 44100 temp{SLASH}src.wav")
-    os.system(f"ffmpeg -loglevel error -i {destination_filename} -ac 1 -ar 44100 temp{SLASH}dest.wav")
+    subprocess.run(
+        [
+            'ffmpeg',
+            '-loglevel', 'error',
+            '-i', source_filename,
+            '-ac', '1',
+            '-ar', '44100',
+            TEMP_DIR / 'src.wav'
+        ],
+        check=True
+    )
+    subprocess.run(
+        [
+            'ffmpeg',
+            '-loglevel', 'error',
+            '-i', destination_filename,
+            '-ac', '1',
+            '-ar', '44100',
+            TEMP_DIR / 'dest.wav'
+        ],
+        check=True
+    )
 
     print("reading audio")
-    fs, source_audio = wavfile.read(f'temp{SLASH}src.wav')
-    fs, dest_audio = wavfile.read(f'temp{SLASH}dest.wav')
+    fs, source_audio = wavfile.read(TEMP_DIR / 'src.wav')
+    fs, dest_audio = wavfile.read(TEMP_DIR / 'dest.wav')
 
     print("analyzing audio")
     samples_per_frame = int(frame_length * fs)
@@ -127,24 +201,46 @@ def main():
         output_audio[i*samples_per_frame : i*samples_per_frame + samples_per_frame*2] += rescaled_frame
 
 
-    wavfile.write(f'temp{SLASH}out.wav',fs, output_audio)
+    wavfile.write(TEMP_DIR / 'out.wav', fs, output_audio)
 
     if source_is_video:
         print("building output video")
-        os.system(f"mkdir temp{SLASH}outframes")
+        outframes_dir = TEMP_DIR / 'outframes'
+        outframes_dir.mkdir()
         for i, match_num in enumerate(best_matches):
-            os.system(f"{COPY} temp{SLASH}frames{SLASH}frame{match_num+1:06d}.png temp{SLASH}outframes{SLASH}frame{i:06d}.png")
-        input_cmd = f"-i temp\\outframes\\frame%06d.png" if os.name == "nt" else f"-pattern_type glob -i {APOS}temp{SLASH}outframes{SLASH}*.png{APOS}"
-        os.system(f"ffmpeg -hide_banner -loglevel error -y -framerate {1/frame_length} {input_cmd} -i temp{SLASH}out.wav -c:a aac -shortest -c:v libx264 -pix_fmt yuv420p {output_filename}")
+            shutil.copy(frames_dir / f'frame{match_num+1:06d}.png', outframes_dir / f'frame{i:06d}.png')
+        subprocess.run(
+            [
+                'ffmpeg',
+                '-hide_banner',
+                '-loglevel', 'error',
+                '-y',
+                '-framerate', str(1/frame_length),
+                '-i', outframes_dir / 'frame%06d.png',
+                '-i', TEMP_DIR / 'out.wav',
+                '-c:a', 'aac',
+                '-shortest',
+                '-c:v', 'libx264',
+                '-pix_fmt', 'yuv420p',
+                output_filename
+            ],
+            check=True
+        )
     else:
-        os.system(f"ffmpeg -i temp{SLASH}out.wav {output_filename}")
+        subprocess.run(
+            [
+                'ffmpeg',
+                '-i', TEMP_DIR / 'out.wav',
+                output_filename
+            ],
+            check=True
+        )
 
 
 if __name__ == '__main__':
     try:
         main()
+        shutil.rmtree(TEMP_DIR)
     except Exception:
-        os.system(f"{DEL} temp")
+        shutil.rmtree(TEMP_DIR, ignore_errors=True)  # no guarantee that temp/ was created
         raise
-    finally:
-        os.system(f"{DEL} temp")
