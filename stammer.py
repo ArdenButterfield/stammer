@@ -229,20 +229,21 @@ def process(source_path, destination_path, output_path):
         )
 
 def main():
-    TEMP_DIR.mkdir()
-    source_path = Path(sys.argv[1])
-    destination_path = Path(sys.argv[2])
-    output_path = Path(sys.argv[3])
-    
-    process(source_path, destination_path, output_path)
-    shutil.rmtree(TEMP_DIR)
-
-if __name__ == '__main__':
     if not len(sys.argv) in (4,):
         print("Usage: python stammer.py <carrier track> <modulator track> <ouptut file>")
         return
     try:
-        main()
+        TEMP_DIR.mkdir()
+        source_path = Path(sys.argv[1])
+        destination_path = Path(sys.argv[2])
+        output_path = Path(sys.argv[3])
+        
+        process(source_path, destination_path, output_path)
+        shutil.rmtree(TEMP_DIR)
     except Exception:
         shutil.rmtree(TEMP_DIR, ignore_errors=True)  # no guarantee that temp/ was created
         raise
+    
+
+if __name__ == '__main__':
+    main()
