@@ -52,22 +52,14 @@ def find_best_match(source_bands, dest_band):
     dot_products = np.sum(source_bands * dest_band, axis=1)
     return np.argmax(dot_products)
 
-def main():
-    if not len(sys.argv) in (4,):
-        print("Usage: python stammer.py <carrier track> <modulator track> <ouptut file>")
-        return
-    source_filename = Path(sys.argv[1])
-    destination_filename = Path(sys.argv[2])
-    output_filename = Path(sys.argv[3])
-    TEMP_DIR.mkdir()
-
+def process(source_path, destination_path, output_path):
     source_type = subprocess.run(
         [
             'ffprobe',
             '-loglevel', 'error',
             '-show_entries', 'stream=codec_type',
             '-of', 'csv=p=0',
-            source_filename
+            source_path
         ],
         capture_output=True,
         check=True,
@@ -79,7 +71,7 @@ def main():
             '-loglevel', 'error',
             '-show_entries', 'stream=codec_type',
             '-of', 'csv=p=0',
-            destination_filename
+            destination_path
         ],
         capture_output=True,
         check=True,
@@ -98,7 +90,7 @@ def main():
             [
                 'ffmpeg',
                 '-loglevel', 'error',
-                '-i', source_filename,
+                '-i', source_path,
                 frames_dir / 'frame%06d.png'
             ],
             check=True
@@ -106,7 +98,7 @@ def main():
         source_duration = subprocess.run(
             [
                 'ffprobe',
-                '-i', source_filename,
+                '-i', source_path,
                 '-show_entries', 'format=duration',
                 '-v', 'quiet',
                 '-of', 'csv=p=0'
@@ -123,7 +115,7 @@ def main():
                 '-count_frames',
                 '-show_entries', 'stream=nb_read_frames',
                 '-print_format', 'csv=p=0',
-                source_filename
+                source_path
             ],
             capture_output=True,
             check=True,
@@ -136,10 +128,10 @@ def main():
         frame_length = source_duration / source_framecount        
 
     elif not 'audio' in source_type:
-        print(f"Unrecognized file type: {source_filename}. Should be audio or video")
+        print(f"Unrecognized file type: {source_path}. Should be audio or video")
         return
     if not (('video' in dest_type) or ('audio' in dest_type)):
-        print(f"Unrecognized file type: {destination_filename}. Should be audio or video")
+        print(f"Unrecognized file type: {destination_path}. Should be audio or video")
         return
 
     print("copying audio")
@@ -147,7 +139,7 @@ def main():
         [
             'ffmpeg',
             '-loglevel', 'error',
-            '-i', source_filename,
+            '-i', source_path,
             '-ac', '1',
             '-ar', '44100',
             TEMP_DIR / 'src.wav'
@@ -158,7 +150,7 @@ def main():
         [
             'ffmpeg',
             '-loglevel', 'error',
-            '-i', destination_filename,
+            '-i', destination_path,
             '-ac', '1',
             '-ar', '44100',
             TEMP_DIR / 'dest.wav'
@@ -222,7 +214,7 @@ def main():
                 '-shortest',
                 '-c:v', 'libx264',
                 '-pix_fmt', 'yuv420p',
-                output_filename
+                output_path
             ],
             check=True
         )
@@ -231,16 +223,26 @@ def main():
             [
                 'ffmpeg',
                 '-i', TEMP_DIR / 'out.wav',
-                output_filename
+                output_path
             ],
             check=True
         )
 
+def main():
+    TEMP_DIR.mkdir()
+    source_path = Path(sys.argv[1])
+    destination_path = Path(sys.argv[2])
+    output_path = Path(sys.argv[3])
+    
+    process(source_path, destination_path, output_path)
+    shutil.rmtree(TEMP_DIR)
 
 if __name__ == '__main__':
+    if not len(sys.argv) in (4,):
+        print("Usage: python stammer.py <carrier track> <modulator track> <ouptut file>")
+        return
     try:
         main()
-        shutil.rmtree(TEMP_DIR)
     except Exception:
         shutil.rmtree(TEMP_DIR, ignore_errors=True)  # no guarantee that temp/ was created
         raise
