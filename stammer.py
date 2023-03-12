@@ -10,6 +10,7 @@ TEMP_DIR = Path('temp')
 DEFAULT_FRAME_LENGTH = 1/25 # Seconds
 
 BAND_WIDTH = 1.2
+INTERNAL_SAMPLERATE = 44100 # Hz
 
 def make_normalized_bands(frames_input,band_width):
     transforms = np.fft.fft(frames_input)
@@ -31,7 +32,7 @@ def make_normalized_bands(frames_input,band_width):
     
     return normalized_bands
 
-def make_frames(input_audio, fs, frame_length):
+def make_frames(input_audio, frame_length):
     if input_audio.dtype != float:
         intmax = np.iinfo(input_audio.dtype).max
         input_audio = input_audio.astype(float) / intmax
@@ -97,6 +98,47 @@ def get_framecount(path):
             text=True
         ).stdout
 
+def build_output_video(frames_dir, outframes_dir, best_matches):
+    print("building output video")
+        
+    for i, match_num in enumerate(best_matches):
+        shutil.copy(frames_dir / f'frame{match_num+1:06d}.png', outframes_dir / f'frame{i:06d}.png')
+    subprocess.run(
+        [
+            'ffmpeg',
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-y',
+            '-framerate', str(1/frame_length),
+            '-i', outframes_dir / 'frame%06d.png',
+            '-i', TEMP_DIR / 'out.wav',
+            '-c:a', 'aac',
+            '-shortest',
+            '-c:v', 'libx264',
+            '-pix_fmt', 'yuv420p',
+            output_path
+        ],
+        check=True
+    )
+
+def create_output_audio(best_matches, dest_audio, source_frames, dest_frames, samples_per_frame):
+    output_audio = np.zeros(dest_audio.shape, dtype=float)
+
+    for i in range(len(dest_frames)):
+        source_frame = source_frames[best_matches[i]]
+        dest_frame = dest_frames[i]
+        dest_frame_amp = np.sqrt(np.sum(dest_frame*dest_frame))
+        source_frame_amp = np.sqrt(np.sum(source_frame*source_frame))
+        if (source_frame_amp == 0):
+            continue
+        rescaled_frame = source_frame * (dest_frame_amp / source_frame_amp)
+
+        if (max(abs(rescaled_frame))) > 1:
+            rescaled_frame /= max(abs(rescaled_frame))
+        output_audio[i*samples_per_frame : i*samples_per_frame + samples_per_frame*2] += rescaled_frame
+
+    wavfile.write(TEMP_DIR / 'out.wav', INTERNAL_SAMPLERATE, output_audio)
+
 def process(source_path, destination_path, output_path):
     source_type = file_type(source_path)
     dest_type = file_type(destination_path)
@@ -138,7 +180,7 @@ def process(source_path, destination_path, output_path):
             '-loglevel', 'error',
             '-i', source_path,
             '-ac', '1',
-            '-ar', '44100',
+            '-ar', str(INTERNAL_SAMPLERATE),
             TEMP_DIR / 'src.wav'
         ],
         check=True
@@ -149,20 +191,20 @@ def process(source_path, destination_path, output_path):
             '-loglevel', 'error',
             '-i', destination_path,
             '-ac', '1',
-            '-ar', '44100',
+            '-ar', str(INTERNAL_SAMPLERATE),
             TEMP_DIR / 'dest.wav'
         ],
         check=True
     )
 
     print("reading audio")
-    fs, source_audio = wavfile.read(TEMP_DIR / 'src.wav')
-    fs, dest_audio = wavfile.read(TEMP_DIR / 'dest.wav')
+    _, source_audio = wavfile.read(TEMP_DIR / 'src.wav')
+    _, dest_audio = wavfile.read(TEMP_DIR / 'dest.wav')
 
     print("analyzing audio")
-    samples_per_frame = int(frame_length * fs)
-    source_frames = make_frames(source_audio, fs, samples_per_frame)
-    dest_frames = make_frames(dest_audio, fs, samples_per_frame)
+    samples_per_frame = int(frame_length * INTERNAL_SAMPLERATE)
+    source_frames = make_frames(source_audio, samples_per_frame)
+    dest_frames = make_frames(dest_audio, samples_per_frame)
 
     source_bands = make_normalized_bands(source_frames, BAND_WIDTH)
     dest_bands = make_normalized_bands(dest_frames, BAND_WIDTH)
@@ -174,47 +216,13 @@ def process(source_path, destination_path, output_path):
 
 
     print("creating output audio")
-    output_audio = np.zeros(dest_audio.shape, dtype=float)
-
-    for i in range(len(dest_frames)):
-        source_frame = source_frames[best_matches[i]]
-        dest_frame = dest_frames[i]
-        dest_frame_amp = np.sqrt(np.sum(dest_frame*dest_frame))
-        source_frame_amp = np.sqrt(np.sum(source_frame*source_frame))
-        if (source_frame_amp == 0):
-            continue
-        rescaled_frame = source_frame * (dest_frame_amp / source_frame_amp)
-
-        if (max(abs(rescaled_frame))) > 1:
-            rescaled_frame /= max(abs(rescaled_frame))
-        output_audio[i*samples_per_frame : i*samples_per_frame + samples_per_frame*2] += rescaled_frame
-
-
-    wavfile.write(TEMP_DIR / 'out.wav', fs, output_audio)
+    create_output_audio(best_matches, dest_audio, source_frames, dest_frames, samples_per_frame)
+    
 
     if source_is_video:
-        print("building output video")
         outframes_dir = TEMP_DIR / 'outframes'
         outframes_dir.mkdir()
-        for i, match_num in enumerate(best_matches):
-            shutil.copy(frames_dir / f'frame{match_num+1:06d}.png', outframes_dir / f'frame{i:06d}.png')
-        subprocess.run(
-            [
-                'ffmpeg',
-                '-hide_banner',
-                '-loglevel', 'error',
-                '-y',
-                '-framerate', str(1/frame_length),
-                '-i', outframes_dir / 'frame%06d.png',
-                '-i', TEMP_DIR / 'out.wav',
-                '-c:a', 'aac',
-                '-shortest',
-                '-c:v', 'libx264',
-                '-pix_fmt', 'yuv420p',
-                output_path
-            ],
-            check=True
-        )
+        build_output_video(frames_dir, outframes_dir, best_matches)
     else:
         subprocess.run(
             [
@@ -241,7 +249,6 @@ def main():
     except Exception:
         shutil.rmtree(TEMP_DIR, ignore_errors=True)  # no guarantee that temp/ was created
         raise
-    
 
 if __name__ == '__main__':
     main()
