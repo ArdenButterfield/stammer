@@ -52,34 +52,54 @@ def find_best_match(source_bands, dest_band):
     dot_products = np.sum(source_bands * dest_band, axis=1)
     return np.argmax(dot_products)
 
-def process(source_path, destination_path, output_path):
-    source_type = subprocess.run(
+def file_type(path):
+    # is the file at path an audio file, video file, or neither?
+    return subprocess.run(
         [
             'ffprobe',
             '-loglevel', 'error',
             '-show_entries', 'stream=codec_type',
             '-of', 'csv=p=0',
-            source_path
-        ],
-        capture_output=True,
-        check=True,
-        text=True
-    ).stdout
-    dest_type = subprocess.run(
-        [
-            'ffprobe',
-            '-loglevel', 'error',
-            '-show_entries', 'stream=codec_type',
-            '-of', 'csv=p=0',
-            destination_path
+            path
         ],
         capture_output=True,
         check=True,
         text=True
     ).stdout
 
-    source_is_video = False
-    frame_length = DEFAULT_FRAME_LENGTH
+def get_duration(path):
+    return subprocess.run(
+            [
+                'ffprobe',
+                '-i', path,
+                '-show_entries', 'format=duration',
+                '-v', 'quiet',
+                '-of', 'csv=p=0'
+            ],
+            capture_output=True,
+            check=True,
+            text=True
+        ).stdout
+
+def get_framecount(path):
+    return subprocess.run(
+            [
+                'ffprobe',
+                '-v', 'error',
+                '-select_streams', 'v:0',
+                '-count_frames',
+                '-show_entries', 'stream=nb_read_frames',
+                '-print_format', 'csv=p=0',
+                path
+            ],
+            capture_output=True,
+            check=True,
+            text=True
+        ).stdout
+
+def process(source_path, destination_path, output_path):
+    source_type = file_type(source_path)
+    dest_type = file_type(destination_path)
 
     if 'video' in source_type:
         source_is_video = True
@@ -95,41 +115,18 @@ def process(source_path, destination_path, output_path):
             ],
             check=True
         )
-        source_duration = subprocess.run(
-            [
-                'ffprobe',
-                '-i', source_path,
-                '-show_entries', 'format=duration',
-                '-v', 'quiet',
-                '-of', 'csv=p=0'
-            ],
-            capture_output=True,
-            check=True,
-            text=True
-        ).stdout
-        source_framecount = subprocess.run(
-            [
-                'ffprobe',
-                '-v', 'error',
-                '-select_streams', 'v:0',
-                '-count_frames',
-                '-show_entries', 'stream=nb_read_frames',
-                '-print_format', 'csv=p=0',
-                source_path
-            ],
-            capture_output=True,
-            check=True,
-            text=True
-        ).stdout
-
-        source_duration = float(source_duration)
-        source_framecount = float(source_framecount)
+        source_duration = float(get_duration(source_path))
+        source_framecount = float(get_framecount(source_path))
 
         frame_length = source_duration / source_framecount        
 
-    elif not 'audio' in source_type:
+    elif 'audio' in source_type:
+        source_is_video = False
+        frame_length = DEFAULT_FRAME_LENGTH
+    else:
         print(f"Unrecognized file type: {source_path}. Should be audio or video")
         return
+
     if not (('video' in dest_type) or ('audio' in dest_type)):
         print(f"Unrecognized file type: {destination_path}. Should be audio or video")
         return
@@ -222,7 +219,8 @@ def process(source_path, destination_path, output_path):
         subprocess.run(
             [
                 'ffmpeg',
-                '-i', TEMP_DIR / 'out.wav',
+                '-loglevel', 'error',
+                '-y', '-i', TEMP_DIR / 'out.wav',
                 output_path
             ],
             check=True
