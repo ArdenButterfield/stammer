@@ -7,7 +7,7 @@ If you re-arranged the frames of [Steamed Hams](https://www.youtube.com/watch?v=
 STAMMER is a python utility for recreating any audio source with the frames of any other audio or video source.
 For each frame in the audio source being recreated, STAMMER selects the frame in the source audio with the most similar spectrum, adjusts its volume as needed, and inserts that frame into the output. Despite its name, STAMMER works on any audio, not just Steamed Hams.
 
-## Instructions (MacOS/Linux)
+## Instructions
 
 STAMMER requires python 3, and the following python libraries:
 
