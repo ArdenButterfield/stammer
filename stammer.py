@@ -49,8 +49,8 @@ def make_frames(input_audio, frame_length):
         
     return frames
 
-def find_best_match(source_bands, dest_band):
-    dot_products = np.sum(source_bands * dest_band, axis=1)
+def find_best_match(carrier_bands, modulator_band):
+    dot_products = np.sum(carrier_bands * modulator_band, axis=1)
     return np.argmax(dot_products)
 
 def file_type(path):
@@ -98,7 +98,7 @@ def get_framecount(path):
             text=True
         ).stdout
 
-def build_output_video(frames_dir, outframes_dir, best_matches):
+def build_output_video(frames_dir, outframes_dir, best_matches, framerate, output_path):
     print("building output video")
         
     for i, match_num in enumerate(best_matches):
@@ -109,7 +109,7 @@ def build_output_video(frames_dir, outframes_dir, best_matches):
             '-hide_banner',
             '-loglevel', 'error',
             '-y',
-            '-framerate', str(1/frame_length),
+            '-framerate', str(framerate),
             '-i', outframes_dir / 'frame%06d.png',
             '-i', TEMP_DIR / 'out.wav',
             '-c:a', 'aac',
@@ -121,17 +121,17 @@ def build_output_video(frames_dir, outframes_dir, best_matches):
         check=True
     )
 
-def create_output_audio(best_matches, dest_audio, source_frames, dest_frames, samples_per_frame):
-    output_audio = np.zeros(dest_audio.shape, dtype=float)
+def create_output_audio(best_matches, modulator_audio, carrier_frames, modulator_frames, samples_per_frame):
+    output_audio = np.zeros(modulator_audio.shape, dtype=float)
 
-    for i in range(len(dest_frames)):
-        source_frame = source_frames[best_matches[i]]
-        dest_frame = dest_frames[i]
-        dest_frame_amp = np.sqrt(np.sum(dest_frame*dest_frame))
-        source_frame_amp = np.sqrt(np.sum(source_frame*source_frame))
-        if (source_frame_amp == 0):
+    for i in range(len(modulator_frames)):
+        carrier_frame = carrier_frames[best_matches[i]]
+        modulator_frame = modulator_frames[i]
+        modulator_frame_amp = np.sqrt(np.sum(modulator_frame*modulator_frame))
+        carrier_frame_amp = np.sqrt(np.sum(carrier_frame*carrier_frame))
+        if (carrier_frame_amp == 0):
             continue
-        rescaled_frame = source_frame * (dest_frame_amp / source_frame_amp)
+        rescaled_frame = carrier_frame * (modulator_frame_amp / carrier_frame_amp)
 
         if (max(abs(rescaled_frame))) > 1:
             rescaled_frame /= max(abs(rescaled_frame))
@@ -139,12 +139,12 @@ def create_output_audio(best_matches, dest_audio, source_frames, dest_frames, sa
 
     wavfile.write(TEMP_DIR / 'out.wav', INTERNAL_SAMPLERATE, output_audio)
 
-def process(source_path, destination_path, output_path):
-    source_type = file_type(source_path)
-    dest_type = file_type(destination_path)
+def process(carrier_path, modulator_path, output_path):
+    carrier_type = file_type(carrier_path)
+    modulator_type = file_type(modulator_path)
 
-    if 'video' in source_type:
-        source_is_video = True
+    if 'video' in carrier_type:
+        carrier_is_video = True
         print("Separating video frames")
         frames_dir = TEMP_DIR / 'frames'
         frames_dir.mkdir()
@@ -152,25 +152,25 @@ def process(source_path, destination_path, output_path):
             [
                 'ffmpeg',
                 '-loglevel', 'error',
-                '-i', source_path,
+                '-i', carrier_path,
                 frames_dir / 'frame%06d.png'
             ],
             check=True
         )
-        source_duration = float(get_duration(source_path))
-        source_framecount = float(get_framecount(source_path))
+        carrier_duration = float(get_duration(carrier_path))
+        carrier_framecount = float(get_framecount(carrier_path))
 
-        frame_length = source_duration / source_framecount        
+        frame_length = carrier_duration / carrier_framecount        
 
-    elif 'audio' in source_type:
-        source_is_video = False
+    elif 'audio' in carrier_type:
+        carrier_is_video = False
         frame_length = DEFAULT_FRAME_LENGTH
     else:
-        print(f"Unrecognized file type: {source_path}. Should be audio or video")
+        print(f"Unrecognized file type: {carrier_path}. Should be audio or video")
         return
 
-    if not (('video' in dest_type) or ('audio' in dest_type)):
-        print(f"Unrecognized file type: {destination_path}. Should be audio or video")
+    if not (('video' in modulator_type) or ('audio' in modulator_type)):
+        print(f"Unrecognized file type: {modulator_path}. Should be audio or video")
         return
 
     print("copying audio")
@@ -178,10 +178,10 @@ def process(source_path, destination_path, output_path):
         [
             'ffmpeg',
             '-loglevel', 'error',
-            '-i', source_path,
+            '-i', carrier_path,
             '-ac', '1',
             '-ar', str(INTERNAL_SAMPLERATE),
-            TEMP_DIR / 'src.wav'
+            TEMP_DIR / 'carrier.wav'
         ],
         check=True
     )
@@ -189,40 +189,40 @@ def process(source_path, destination_path, output_path):
         [
             'ffmpeg',
             '-loglevel', 'error',
-            '-i', destination_path,
+            '-i', modulator_path,
             '-ac', '1',
             '-ar', str(INTERNAL_SAMPLERATE),
-            TEMP_DIR / 'dest.wav'
+            TEMP_DIR / 'modulator.wav'
         ],
         check=True
     )
 
     print("reading audio")
-    _, source_audio = wavfile.read(TEMP_DIR / 'src.wav')
-    _, dest_audio = wavfile.read(TEMP_DIR / 'dest.wav')
+    _, carrier_audio = wavfile.read(TEMP_DIR / 'carrier.wav')
+    _, modulator_audio = wavfile.read(TEMP_DIR / 'modulator.wav')
 
     print("analyzing audio")
     samples_per_frame = int(frame_length * INTERNAL_SAMPLERATE)
-    source_frames = make_frames(source_audio, samples_per_frame)
-    dest_frames = make_frames(dest_audio, samples_per_frame)
+    carrier_frames = make_frames(carrier_audio, samples_per_frame)
+    modulator_frames = make_frames(modulator_audio, samples_per_frame)
 
-    source_bands = make_normalized_bands(source_frames, BAND_WIDTH)
-    dest_bands = make_normalized_bands(dest_frames, BAND_WIDTH)
+    carrier_bands = make_normalized_bands(carrier_frames, BAND_WIDTH)
+    modulator_bands = make_normalized_bands(modulator_frames, BAND_WIDTH)
 
     print("finding best matches")
     best_matches = []
-    for i in range(len(dest_bands)):
-        best_matches.append(find_best_match(source_bands,dest_bands[i]))
+    for i in range(len(modulator_bands)):
+        best_matches.append(find_best_match(carrier_bands,modulator_bands[i]))
 
 
     print("creating output audio")
-    create_output_audio(best_matches, dest_audio, source_frames, dest_frames, samples_per_frame)
+    create_output_audio(best_matches, modulator_audio, carrier_frames, modulator_frames, samples_per_frame)
     
 
-    if source_is_video:
+    if carrier_is_video:
         outframes_dir = TEMP_DIR / 'outframes'
         outframes_dir.mkdir()
-        build_output_video(frames_dir, outframes_dir, best_matches)
+        build_output_video(frames_dir, outframes_dir, best_matches, 1/frame_length, output_path)
     else:
         subprocess.run(
             [
@@ -240,11 +240,11 @@ def main():
         return
     try:
         TEMP_DIR.mkdir()
-        source_path = Path(sys.argv[1])
-        destination_path = Path(sys.argv[2])
+        carrier_path = Path(sys.argv[1])
+        modulator_path = Path(sys.argv[2])
         output_path = Path(sys.argv[3])
         
-        process(source_path, destination_path, output_path)
+        process(carrier_path, modulator_path, output_path)
         shutil.rmtree(TEMP_DIR)
     except Exception:
         shutil.rmtree(TEMP_DIR, ignore_errors=True)  # no guarantee that temp/ was created
