@@ -21,7 +21,7 @@ It also requires the command line utility `ffmpeg`.
 STAMMER can be run from the command line with the command
 
 ```sh
-python stammer.py <carrier track> <modulator track> <ouptut file>
+python stammer.py <carrier track> <modulator track> <output file>
 ```
 
 where `<carrier track>` is the path to an audio or video file that frames will be taken from (i.e. Steamed Hams in the above example), `<modulator track>` is the path to an audio or video file that will be reconstructed using the carrier track, and `<output file>` is a path to file that will be written to. `<output file>` should have an audio or video file extension (such as `.wav`, `.mp3`, `.mp4`, etc).
