@@ -1,9 +1,9 @@
+from argparse import ArgumentParser
 import numpy as np
 from scipy.io import wavfile
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 
 TEMP_DIR = Path('temp')
 
@@ -245,16 +245,19 @@ def main():
     # check required command line tools
     test_command(['ffmpeg', '-version'])
     test_command(['ffprobe', '-version'])
+    
+    parser = ArgumentParser()
+    parser.add_argument('carrier_path', type=Path, metavar='carrier_track', help='path to an audio or video file that frames will be taken from')
+    parser.add_argument('modulator_path', type=Path, metavar='modulator_track', help='path to an audio or video file that will be reconstructed using the carrier track')
+    parser.add_argument('output_path', type=Path, metavar='output_file', help='path to file that will be written to; should have an audio or video file extension (such as .wav, .mp3, .mp4, etc.)')
+    args = parser.parse_args()
+    
     if not len(sys.argv) in (4,):
         print("Usage: python stammer.py <carrier track> <modulator track> <ouptut file>")
         return
     try:
         TEMP_DIR.mkdir()
-        carrier_path = Path(sys.argv[1])
-        modulator_path = Path(sys.argv[2])
-        output_path = Path(sys.argv[3])
-        
-        process(carrier_path, modulator_path, output_path)
+        process(**vars(args))
         shutil.rmtree(TEMP_DIR)
     except Exception:
         shutil.rmtree(TEMP_DIR, ignore_errors=True)  # no guarantee that temp/ was created
