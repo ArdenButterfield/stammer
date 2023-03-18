@@ -169,6 +169,7 @@ def get_audio_as_wav_bytes(path):
             '-hide_banner',
             '-loglevel', 'error',
             '-i', path,
+            '-vn', '-map', '0:a:0',
             '-ac', '1',
             '-ar', str(INTERNAL_SAMPLERATE),
             '-c:a', 'pcm_s16le',
