@@ -12,6 +12,13 @@ DEFAULT_FRAME_LENGTH = 1/25 # Seconds
 BAND_WIDTH = 1.2
 INTERNAL_SAMPLERATE = 44100 # Hz
 
+def test_command(cmd):
+    try:
+        subprocess.run(cmd, capture_output=True)
+    except FileNotFoundError as error:
+        print(f"ERROR: '{cmd[0]}' not found. Please install it.")
+        raise error
+
 def make_normalized_bands(frames_input,band_width):
     transforms = np.fft.fft(frames_input)
     spectra = abs(transforms[:,1:len(transforms[0])//2])
@@ -235,6 +242,9 @@ def process(carrier_path, modulator_path, output_path):
         )
 
 def main():
+    # check required command line tools
+    test_command(['ffmpeg', '-version'])
+    test_command(['ffprobe', '-version'])
     if not len(sys.argv) in (4,):
         print("Usage: python stammer.py <carrier track> <modulator track> <ouptut file>")
         return
