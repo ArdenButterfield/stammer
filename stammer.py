@@ -146,34 +146,75 @@ def create_output_audio(best_matches, modulator_audio, carrier_frames, modulator
 
     wavfile.write(TEMP_DIR / 'out.wav', INTERNAL_SAMPLERATE, output_audio)
 
+COMMON_AUDIO_EXTS = [
+    "wav",
+    "wv",
+    "mp3",
+    "m4a",
+    "aac",
+    "ogg",
+    "opus",
+]
+
+def is_audio_filename(name):
+    import os.path
+    return os.path.splitext(name)[1][1:] in COMMON_AUDIO_EXTS
+
+def get_audio_as_wav_bytes(path):
+    import io
+
+    ff_out = bytearray(subprocess.check_output(
+        [
+            'ffmpeg',
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-i', path,
+            '-vn', '-map', '0:a:0',
+            '-ac', '1',
+            '-ar', str(INTERNAL_SAMPLERATE),
+            '-c:a', 'pcm_s16le',
+            '-f', 'wav', '-'
+        ]
+    ))
+
+    # fix file size in header length
+    actual_data_len = len(ff_out)-44
+    ff_out[4:8] = (actual_data_len).to_bytes(4,byteorder="little")
+
+    return io.BytesIO(bytes(ff_out))
+
 def process(carrier_path, modulator_path, output_path):
     if not carrier_path.is_file():
         raise FileNotFoundError(f"Carrier file {carrier_path} not found.")
     if not modulator_path.is_file():
         raise FileNotFoundError(f"Modulator file {modulator_path} not found.")
-
-
     carrier_type = file_type(carrier_path)
     modulator_type = file_type(modulator_path)
 
     if 'video' in carrier_type:
-        carrier_is_video = True
-        print("Separating video frames")
-        frames_dir = TEMP_DIR / 'frames'
-        frames_dir.mkdir()
-        subprocess.run(
-            [
-                'ffmpeg',
-                '-loglevel', 'error',
-                '-i', carrier_path,
-                frames_dir / 'frame%06d.png'
-            ],
-            check=True
-        )
+        output_is_audio = is_audio_filename(output_path)
+        carrier_is_video = not output_is_audio
+
+        print("Calculating video length")
         carrier_duration = float(get_duration(carrier_path))
         carrier_framecount = float(get_framecount(carrier_path))
 
-        frame_length = carrier_duration / carrier_framecount        
+        if not output_is_audio:
+            print("Separating video frames")
+            frames_dir = TEMP_DIR / 'frames'
+            frames_dir.mkdir()
+            subprocess.run(
+                [
+                    'ffmpeg',
+                    '-loglevel', 'error',
+                    '-i', carrier_path,
+                    frames_dir / 'frame%06d.png'
+                ],
+                check=True
+            )
+
+        frame_length = carrier_duration / carrier_framecount
+
 
     elif 'audio' in carrier_type:
         carrier_is_video = False
@@ -186,33 +227,9 @@ def process(carrier_path, modulator_path, output_path):
         print(f"Unrecognized file type: {modulator_path}. Should be audio or video")
         return
 
-    print("copying audio")
-    subprocess.run(
-        [
-            'ffmpeg',
-            '-loglevel', 'error',
-            '-i', carrier_path,
-            '-ac', '1',
-            '-ar', str(INTERNAL_SAMPLERATE),
-            TEMP_DIR / 'carrier.wav'
-        ],
-        check=True
-    )
-    subprocess.run(
-        [
-            'ffmpeg',
-            '-loglevel', 'error',
-            '-i', modulator_path,
-            '-ac', '1',
-            '-ar', str(INTERNAL_SAMPLERATE),
-            TEMP_DIR / 'modulator.wav'
-        ],
-        check=True
-    )
-
     print("reading audio")
-    _, carrier_audio = wavfile.read(TEMP_DIR / 'carrier.wav')
-    _, modulator_audio = wavfile.read(TEMP_DIR / 'modulator.wav')
+    _, carrier_audio = wavfile.read(get_audio_as_wav_bytes(carrier_path))
+    _, modulator_audio = wavfile.read(get_audio_as_wav_bytes(modulator_path))
 
     print("analyzing audio")
     samples_per_frame = int(frame_length * INTERNAL_SAMPLERATE)
@@ -258,13 +275,17 @@ def main():
     parser.add_argument('output_path', type=Path, metavar='output_file', help='path to file that will be written to; should have an audio or video file extension (such as .wav, .mp3, .mp4, etc.)')
     args = parser.parse_args()
     
-    try:
-        TEMP_DIR.mkdir()
-        process(**vars(args))
-        shutil.rmtree(TEMP_DIR)
-    except Exception:
-        shutil.rmtree(TEMP_DIR, ignore_errors=True)  # no guarantee that temp/ was created
-        raise
+    import os.path
+    if (os.path.isdir(TEMP_DIR)):
+        print("\
+The \"temp\" directory already exists.\n\
+This may indicate that STAMMER recently crashed,\n\
+or you are currently running another instance of STAMMER (this is not supported).\n\
+If possible, delete the \"temp\" directory to continue.")
+        return
+    TEMP_DIR.mkdir()
+    process(**vars(args))
+    shutil.rmtree(TEMP_DIR)
 
 if __name__ == '__main__':
     main()
