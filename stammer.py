@@ -146,6 +146,29 @@ def create_output_audio(best_matches, modulator_audio, carrier_frames, modulator
 
     wavfile.write(TEMP_DIR / 'out.wav', INTERNAL_SAMPLERATE, output_audio)
 
+def get_audio_as_wav_bytes(path):
+    import io
+
+    ff_out = bytearray(subprocess.check_output(
+        [
+            'ffmpeg',
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-i', path,
+            '-ac', '1',
+            '-ar', str(INTERNAL_SAMPLERATE),
+            '-c:a', 'pcm_s16le',
+            '-f', 'wav', '-'
+        ]
+    ))
+
+    # fix file size in header length
+    actual_data_len = len(ff_out)-44
+    ff_out[4:8] = (actual_data_len).to_bytes(4,byteorder="little")
+
+    return io.BytesIO(bytes(ff_out))
+
+
 def process(carrier_path, modulator_path, output_path):
     if not carrier_path.is_file():
         raise FileNotFoundError(f"Carrier file {carrier_path} not found.")
@@ -186,33 +209,9 @@ def process(carrier_path, modulator_path, output_path):
         print(f"Unrecognized file type: {modulator_path}. Should be audio or video")
         return
 
-    print("copying audio")
-    subprocess.run(
-        [
-            'ffmpeg',
-            '-loglevel', 'error',
-            '-i', carrier_path,
-            '-ac', '1',
-            '-ar', str(INTERNAL_SAMPLERATE),
-            TEMP_DIR / 'carrier.wav'
-        ],
-        check=True
-    )
-    subprocess.run(
-        [
-            'ffmpeg',
-            '-loglevel', 'error',
-            '-i', modulator_path,
-            '-ac', '1',
-            '-ar', str(INTERNAL_SAMPLERATE),
-            TEMP_DIR / 'modulator.wav'
-        ],
-        check=True
-    )
-
     print("reading audio")
-    _, carrier_audio = wavfile.read(TEMP_DIR / 'carrier.wav')
-    _, modulator_audio = wavfile.read(TEMP_DIR / 'modulator.wav')
+    _, carrier_audio = wavfile.read(get_audio_as_wav_bytes(carrier_path))
+    _, modulator_audio = wavfile.read(get_audio_as_wav_bytes(modulator_path))
 
     print("analyzing audio")
     samples_per_frame = int(frame_length * INTERNAL_SAMPLERATE)
