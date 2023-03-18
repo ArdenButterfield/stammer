@@ -147,6 +147,12 @@ def create_output_audio(best_matches, modulator_audio, carrier_frames, modulator
     wavfile.write(TEMP_DIR / 'out.wav', INTERNAL_SAMPLERATE, output_audio)
 
 def process(carrier_path, modulator_path, output_path):
+    if not carrier_path.is_file():
+        raise FileNotFoundError(f"Carrier file {carrier_path} not found.")
+    if not modulator_path.is_file():
+        raise FileNotFoundError(f"Modulator file {modulator_path} not found.")
+
+
     carrier_type = file_type(carrier_path)
     modulator_type = file_type(modulator_path)
 
@@ -252,9 +258,6 @@ def main():
     parser.add_argument('output_path', type=Path, metavar='output_file', help='path to file that will be written to; should have an audio or video file extension (such as .wav, .mp3, .mp4, etc.)')
     args = parser.parse_args()
     
-    if not len(sys.argv) in (4,):
-        print("Usage: python stammer.py <carrier track> <modulator track> <ouptut file>")
-        return
     try:
         TEMP_DIR.mkdir()
         process(**vars(args))
