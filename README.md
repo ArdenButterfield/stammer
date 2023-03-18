@@ -27,12 +27,13 @@ python stammer.py <carrier track> <modulator track> <output file>
 where `<carrier track>` is the path to an audio or video file that frames will be taken from (i.e. Steamed Hams in the above example), `<modulator track>` is the path to an audio or video file that will be reconstructed using the carrier track, and `<output file>` is a path to file that will be written to. `<output file>` should have an audio or video file extension (such as `.wav`, `.mp3`, `.mp4`, etc).
 
 ### Warnings
+At the start of its operation, STAMMER creates a directory called `temp`, where it writes files to work. At the end of its operation, STAMMER will delete this directory. However, if the program is forcefully terminated or crashes during operation, this directory will still exist.
 
-During its operation, STAMMER creates a directory called `temp`, where it writes files. At the end of its operation, STAMMER will delete this directory. However, if the program is terminated or crashes during operation, this directory will still exist and will need to be deleted by the user.
+Another case where `temp` unexpectedly remains is when trying to run two instances of STAMMER on the same machine at once; the result is that they will race to overwrite eachother's files.
 
-Because of this, running two instances of STAMMER on the same machine at once will lead to errors, as files will get overwritten.
+STAMMER isn't designed to cope with this, so STAMMER will only work when `temp` doesn't already exist. Otherwise, it will warn you to _delete the directory yourself._
 
-There are plans to solve this in future versions of STAMMER by storing the data in memory instead of on disk.
+There are plans to solve this in future versions of STAMMER by keeping necessary data in memory instead of on disk, and/or creating uniquely-named temporary folders.
 
 ## Why and How
 

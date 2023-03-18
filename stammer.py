@@ -258,13 +258,17 @@ def main():
     parser.add_argument('output_path', type=Path, metavar='output_file', help='path to file that will be written to; should have an audio or video file extension (such as .wav, .mp3, .mp4, etc.)')
     args = parser.parse_args()
     
-    try:
-        TEMP_DIR.mkdir()
-        process(**vars(args))
-        shutil.rmtree(TEMP_DIR)
-    except Exception:
-        shutil.rmtree(TEMP_DIR, ignore_errors=True)  # no guarantee that temp/ was created
-        raise
+    import os.path
+    if (os.path.isdir(TEMP_DIR)):
+        print("\
+The \"temp\" directory already exists.\n\
+This may indicate that STAMMER recently crashed,\n\
+or you are currently running another instance of STAMMER (this is not supported).\n\
+If possible, delete the \"temp\" directory to continue.")
+        return
+    TEMP_DIR.mkdir()
+    process(**vars(args))
+    shutil.rmtree(TEMP_DIR)
 
 if __name__ == '__main__':
     main()
