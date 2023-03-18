@@ -146,34 +146,53 @@ def create_output_audio(best_matches, modulator_audio, carrier_frames, modulator
 
     wavfile.write(TEMP_DIR / 'out.wav', INTERNAL_SAMPLERATE, output_audio)
 
+
+COMMON_AUDIO_EXTS = [
+    "wav",
+    "wv",
+    "mp3",
+    "m4a",
+    "aac",
+    "ogg",
+    "opus",
+]
+
+def is_audio_filename(name):
+    import os.path
+    return os.path.splitext(name)[1][1:] in COMMON_AUDIO_EXTS
+
 def process(carrier_path, modulator_path, output_path):
     if not carrier_path.is_file():
         raise FileNotFoundError(f"Carrier file {carrier_path} not found.")
     if not modulator_path.is_file():
         raise FileNotFoundError(f"Modulator file {modulator_path} not found.")
-
-
     carrier_type = file_type(carrier_path)
     modulator_type = file_type(modulator_path)
 
     if 'video' in carrier_type:
-        carrier_is_video = True
-        print("Separating video frames")
-        frames_dir = TEMP_DIR / 'frames'
-        frames_dir.mkdir()
-        subprocess.run(
-            [
-                'ffmpeg',
-                '-loglevel', 'error',
-                '-i', carrier_path,
-                frames_dir / 'frame%06d.png'
-            ],
-            check=True
-        )
+        output_is_audio = is_audio_filename(output_path)
+        carrier_is_video = not output_is_audio
+
+        print("Calculating video length")
         carrier_duration = float(get_duration(carrier_path))
         carrier_framecount = float(get_framecount(carrier_path))
 
-        frame_length = carrier_duration / carrier_framecount        
+        if not output_is_audio:
+            print("Separating video frames")
+            frames_dir = TEMP_DIR / 'frames'
+            frames_dir.mkdir()
+            subprocess.run(
+                [
+                    'ffmpeg',
+                    '-loglevel', 'error',
+                    '-i', carrier_path,
+                    frames_dir / 'frame%06d.png'
+                ],
+                check=True
+            )
+
+        frame_length = carrier_duration / carrier_framecount
+
 
     elif 'audio' in carrier_type:
         carrier_is_video = False
