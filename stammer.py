@@ -1,14 +1,19 @@
 from argparse import ArgumentParser
+from typing import List
 import numpy as np
 from scipy.io import wavfile
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+from tilings.image_tiling import Tiling
+from scratch_fractions.from_scratch import as_array
+from PIL import Image
 
 TEMP_DIR = Path('temp')
 
 MAX_BASIS_WIDTH = 6
+MAX_TESSELLATION_COUNT = 9
 DEFAULT_FRAME_LENGTH = 1/25 # Seconds
 
 BAND_WIDTH = 1.2
@@ -133,9 +138,32 @@ def get_framecount(path):
 
 def build_output_video(frames_dir, outframes_dir, best_matches, basis_coefficients, framerate, output_path):
     print("building output video")
-        
-    for i, match_num in enumerate(best_matches):
-        shutil.copy(frames_dir / f'frame{match_num+1:06d}.png', outframes_dir / f'frame{i:06d}.png')
+    def tesselate_composite(match_row, basis_coefficients, i):
+        tiles: List[Image.Image] = []
+        bits: List[List[int]] = []
+        used_coeffs = [(j, coefficient) for j, coefficient in enumerate(basis_coefficients) if coefficient != 0]
+        for k, coeff in used_coeffs:
+            tiles.append[Image.open(frames_dir / f'frame{match_row[k]+1:06d}.png')]
+            hot_bits,_ = as_array(coeff)
+            bits.append(hot_bits)
+        tesselation = Tiling(height=tiles[0].height,width=tiles[0].width)
+        output_frame = Image.new('RGB',(tiles[0].width, tiles[0].height))
+
+        for m in np.arange(1,MAX_TESSELLATION_COUNT):
+            first_hot = next(((offset, x) for offset, x in enumerate(bits) if x[m]), None)
+            if first_hot is not None:
+                do_tile = tesselation.needs_tiling
+                tb = tiles[first_hot[0]].copy()
+                x0, y0, w, h = tesselation.get_image_placement()
+                tb.thumbnail((w,h))
+                output_frame.paste(tb, (x0,y0))
+                if do_tile:
+                    output_frame.paste(tb,(x0, y0 + tb.height))
+        output_frame.save(outframes_dir / f'frame{i:06d}.png')
+
+
+    for i, match_row in enumerate(best_matches):
+        tesselate_composite(match_row=match_row, basis_coefficients=basis_coefficients[i], i=i)
     subprocess.run(
         [
             'ffmpeg',
