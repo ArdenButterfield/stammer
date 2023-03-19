@@ -32,6 +32,7 @@ class Tiling:
             self.side = Side.LEFT
         else:
             self.side = Side.BOTTOM
+        self.needs_tiling = True
         
     def get_image_placement(self):
         pos_height, pos_width, pos_x0, pos_y0 = None, None, None, None
@@ -56,6 +57,7 @@ class Tiling:
                 self.bottom -= pos_height
                 pos_y0 = self.bottom
         self.side = Side.next_ccw(self.side)
+        self.needs_tiling = not self.needs_tiling
         return (pos_x0, pos_y0, pos_width, pos_height)
     
 def main():
@@ -88,11 +90,14 @@ def main():
 
     for i in np.arange(1,8):
         debug_path = directory / f'debug_{i:>02}.png'
+        do_tile = tiling.needs_tiling
         if a[i]:
             x0, y0, w, h = tiling.get_image_placement()
             tb = krusty_burger.copy()
             tb.thumbnail((w,h))
             output.paste(tb, (x0,y0))
+            if do_tile:
+                output.paste(tb,(x0, y0 + tb.height))
             output.save(debug_path)
             continue
         elif b[i]:
@@ -100,6 +105,8 @@ def main():
             tb = chalmers.copy()
             tb.thumbnail((w,h))
             output.paste(tb, (x0,y0))
+            if do_tile:
+                output.paste(tb,(x0, y0 + tb.height))
             output.save(debug_path)
             continue
         if c[i]:
@@ -107,6 +114,8 @@ def main():
             tb = skinner.copy()
             tb.thumbnail((w,h))
             output.paste(tb, (x0,y0))
+            if do_tile:
+                output.paste(tb,(x0, y0 + tb.height))
             output.save(debug_path)
 
     output.save(output_path)    
