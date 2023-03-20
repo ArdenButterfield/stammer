@@ -143,7 +143,7 @@ def build_output_video(frames_dir, outframes_dir, best_matches, basis_coefficien
         bits: List[List[int]] = []
         used_coeffs = [(j, coefficient) for j, coefficient in enumerate(basis_coefficients) if coefficient != 0]
         for k, coeff in used_coeffs:
-            tiles.append[Image.open(frames_dir / f'frame{match_row[k]+1:06d}.png')]
+            tiles.append(Image.open(frames_dir / f'frame{match_row[k]+1:06d}.png'))
             hot_bits,_ = as_array(coeff)
             bits.append(hot_bits)
         tesselation = Tiling(height=tiles[0].height,width=tiles[0].width)
