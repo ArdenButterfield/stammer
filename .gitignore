@@ -130,3 +130,17 @@ dmypy.json
 
 # temp dir
 temp/
+
+# Audio and video
+*.mp4
+*.mkv
+*.webm
+*.avi
+*.wav
+*.wv
+*.flac
+*.m4a
+*.aac
+*.mp3
+*.ogg
+*.opus
