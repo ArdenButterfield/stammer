@@ -4,6 +4,7 @@ from scipy.io import wavfile
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 
 TEMP_DIR = Path('temp')
 
@@ -274,18 +275,11 @@ def main():
     parser.add_argument('modulator_path', type=Path, metavar='modulator_track', help='path to an audio or video file that will be reconstructed using the carrier track')
     parser.add_argument('output_path', type=Path, metavar='output_file', help='path to file that will be written to; should have an audio or video file extension (such as .wav, .mp3, .mp4, etc.)')
     args = parser.parse_args()
-    
-    import os.path
-    if (os.path.isdir(TEMP_DIR)):
-        print("\
-The \"temp\" directory already exists.\n\
-This may indicate that STAMMER recently crashed,\n\
-or you are currently running another instance of STAMMER (this is not supported).\n\
-If possible, delete the \"temp\" directory to continue.")
-        return
-    TEMP_DIR.mkdir()
-    process(**vars(args))
-    shutil.rmtree(TEMP_DIR)
+    with tempfile.TemporaryDirectory() as tempdir:
+        global TEMP_DIR
+        TEMP_DIR = Path(tempdir)
+        process(**vars(args))
+
 
 if __name__ == '__main__':
     main()
