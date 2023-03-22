@@ -6,8 +6,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from tilings.image_tiling import Tiling
-from scratch_fractions.from_scratch import as_array
+import image_tiling
+import fraction_bits
 from PIL import Image
 import tempfile
 
@@ -145,9 +145,9 @@ def build_output_video(frames_dir, outframes_dir, best_matches, basis_coefficien
         used_coeffs = [(j, coefficient) for j, coefficient in enumerate(basis_coefficients) if coefficient != 0]
         for k, coeff in used_coeffs:
             tiles.append(Image.open(frames_dir / f'frame{match_row[k]+1:06d}.png'))
-            hot_bits,_ = as_array(coeff)
+            hot_bits,_ = fraction_bits.as_array(coeff)
             bits.append(hot_bits)
-        tesselation = Tiling(height=tiles[0].height,width=tiles[0].width)
+        tesselation = image_tiling.Tiling(height=tiles[0].height,width=tiles[0].width)
         output_frame = Image.new('RGB',(tiles[0].width, tiles[0].height))
 
         for m in np.arange(1,MAX_TESSELLATION_COUNT):
