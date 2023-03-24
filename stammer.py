@@ -104,7 +104,7 @@ def file_type(path):
             '-loglevel', 'error',
             '-show_entries', 'stream=codec_type',
             '-of', 'csv=p=0',
-            path
+            str(path)
         ],
         capture_output=True,
         check=True,
@@ -115,7 +115,7 @@ def get_duration(path):
     return subprocess.run(
             [
                 'ffprobe',
-                '-i', path,
+                '-i', str(path),
                 '-show_entries', 'format=duration',
                 '-v', 'quiet',
                 '-of', 'csv=p=0'
@@ -134,7 +134,7 @@ def get_framecount(path):
                 '-count_frames',
                 '-show_entries', 'stream=nb_read_frames',
                 '-print_format', 'csv=p=0',
-                path
+                str(path)
             ],
             capture_output=True,
             check=True,
@@ -179,13 +179,13 @@ def build_output_video(frames_dir, outframes_dir, best_matches, basis_coefficien
             '-loglevel', 'error',
             '-y',
             '-framerate', str(framerate),
-            '-i', outframes_dir / 'frame%06d.png',
-            '-i', TEMP_DIR / 'out.wav',
+            '-i', str(outframes_dir / 'frame%06d.png'),
+            '-i', str(TEMP_DIR / 'out.wav'),
             '-c:a', 'aac',
             '-shortest',
             '-c:v', 'libx264',
             '-pix_fmt', 'yuv420p',
-            output_path
+            str(output_path)
         ],
         check=True
     )
@@ -244,7 +244,7 @@ def get_audio_as_wav_bytes(path):
             'ffmpeg',
             '-hide_banner',
             '-loglevel', 'error',
-            '-i', path,
+            '-i', str(path),
             '-vn', '-map', '0:a:0',
             '-ac', '1',
             '-ar', str(INTERNAL_SAMPLERATE),
@@ -283,8 +283,8 @@ def process(carrier_path, modulator_path, output_path, combination_mode=False):
                 [
                     'ffmpeg',
                     '-loglevel', 'error',
-                    '-i', carrier_path,
-                    frames_dir / 'frame%06d.png'
+                    '-i', str(carrier_path),
+                    str(frames_dir / 'frame%06d.png')
                 ],
                 check=True
             )
@@ -343,8 +343,8 @@ def process(carrier_path, modulator_path, output_path, combination_mode=False):
             [
                 'ffmpeg',
                 '-loglevel', 'error',
-                '-y', '-i', TEMP_DIR / 'out.wav',
-                output_path
+                '-y', '-i', str(TEMP_DIR / 'out.wav'),
+                str(output_path)
             ],
             check=True
         )
