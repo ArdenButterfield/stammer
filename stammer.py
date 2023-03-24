@@ -1,13 +1,20 @@
 from argparse import ArgumentParser
+from typing import List
 import numpy as np
 from scipy.io import wavfile
 from pathlib import Path
 import shutil
 import subprocess
+import sys
+import image_tiling
+import fraction_bits
+from PIL import Image
 import tempfile
 
 TEMP_DIR = Path('temp')
 
+MAX_BASIS_WIDTH = 6
+MAX_TESSELLATION_COUNT = 9
 DEFAULT_FRAME_LENGTH = 1/25 # Seconds
 
 BAND_WIDTH = 1.2
@@ -57,9 +64,36 @@ def make_frames(input_audio, frame_length):
         
     return frames
 
-def find_best_match(carrier_bands, modulator_band):
-    dot_products = np.sum(carrier_bands * modulator_band, axis=1)
-    return np.argmax(dot_products)
+def find_best_match(carrier_bands, modulator_band, compose=False):
+    if not compose:
+        dot_products = np.sum(carrier_bands * modulator_band, axis=1)
+        return np.argmax(dot_products)
+    proj_indices = []
+    coeffs = []
+    pre, post, delta = None, None, None
+    basis_epsilon = 5e-16
+    while (delta is None or delta < 0) and ((not coeffs) or basis_epsilon < np.abs(coeffs[-1])) and ((not proj_indices) or len(proj_indices) == 1 or len(proj_indices) != MAX_BASIS_WIDTH): 
+        dot_products = np.sum(carrier_bands * modulator_band, axis=1)
+        max = np.argmax(dot_products)
+        proj_indices.append(max)
+        orth_band = carrier_bands[proj_indices[-1]]
+        coeffs.append(np.sum(orth_band * modulator_band))
+        decrement = coeffs[-1] * orth_band
+        if not post is None:
+            pre = post
+        else:
+            pre = np.sum(np.ones(len(modulator_band))* np.abs(modulator_band))
+        modulator_band -= decrement
+        post = np.sum(np.ones(len(modulator_band))* np.abs(modulator_band))
+        delta = post - pre
+    if np.abs(proj_indices[-1]) < basis_epsilon or np.abs(coeffs[-1]) < basis_epsilon:
+        proj_indices.pop()
+        coeffs.pop()
+    padding = [0] * (MAX_BASIS_WIDTH - len(proj_indices))
+    proj_indices = proj_indices + padding
+    basis_array = np.asarray(proj_indices, dtype=np.int32)
+    return (basis_array, coeffs + padding)
+
 
 def file_type(path):
     # is the file at path an audio file, video file, or neither?
@@ -106,11 +140,37 @@ def get_framecount(path):
             text=True
         ).stdout
 
-def build_output_video(frames_dir, outframes_dir, best_matches, framerate, output_path):
+def build_output_video(frames_dir, outframes_dir, best_matches, basis_coefficients, framerate, output_path):
     print("building output video")
-        
-    for i, match_num in enumerate(best_matches):
-        shutil.copy(frames_dir / f'frame{match_num+1:06d}.png', outframes_dir / f'frame{i:06d}.png')
+    def tesselate_composite(match_row, basis_coefficients, i):
+        tiles: List[Image.Image] = []
+        bits: List[List[int]] = []
+        used_coeffs = [(j, coefficient) for j, coefficient in enumerate(basis_coefficients) if coefficient != 0]
+        for k, coeff in used_coeffs:
+            tiles.append(Image.open(frames_dir / f'frame{match_row[k]+1:06d}.png'))
+            hot_bits,_ = fraction_bits.as_array(coeff)
+            bits.append(hot_bits)
+        tesselation = image_tiling.Tiling(height=tiles[0].height,width=tiles[0].width)
+        output_frame = Image.new('RGB',(tiles[0].width, tiles[0].height))
+
+        for m in np.arange(1,MAX_TESSELLATION_COUNT):
+            first_hot = next(((offset, x) for offset, x in enumerate(bits) if x[m]), None)
+            if first_hot is not None:
+                do_tile = tesselation.needs_tiling
+                tb = tiles[first_hot[0]].copy()
+                x0, y0, w, h = tesselation.get_image_placement()
+                tb.thumbnail((w,h))
+                output_frame.paste(tb, (x0,y0))
+                if do_tile:
+                    output_frame.paste(tb,(x0, y0 + tb.height))
+        output_frame.save(outframes_dir / f'frame{i:06d}.png')
+
+    if type(best_matches) == list:
+        for i, match_num in enumerate(best_matches):
+            shutil.copy(frames_dir / f'frame{match_num+1:06d}.png', outframes_dir / f'frame{i:06d}.png')
+    else:
+        for i, match_row in enumerate(best_matches):
+            tesselate_composite(match_row=match_row, basis_coefficients=basis_coefficients[i], i=i)
     subprocess.run(
         [
             'ffmpeg',
@@ -129,21 +189,35 @@ def build_output_video(frames_dir, outframes_dir, best_matches, framerate, outpu
         check=True
     )
 
-def create_output_audio(best_matches, modulator_audio, carrier_frames, modulator_frames, samples_per_frame):
+def create_output_audio(best_matches, coefficients, modulator_audio, carrier_frames, modulator_frames, samples_per_frame):
     output_audio = np.zeros(modulator_audio.shape, dtype=float)
+    def get_carrier(k,c):
+        composite_carrier = None
+        for index, element in enumerate(c):
+            if element == 0:
+                break
+            if index == 0:
+                composite_carrier = carrier_frames[k[index]]*element
+            else:
+                composite_carrier += carrier_frames[k[index]]*element
+        return composite_carrier
+    if type(best_matches) == list:
+        for i in range(len(modulator_frames)):
+            carrier_frame = carrier_frames[best_matches[i]]
+            modulator_frame = modulator_frames[i]
+            modulator_frame_amp = np.sqrt(np.sum(modulator_frame*modulator_frame))
+            carrier_frame_amp = np.sqrt(np.sum(carrier_frame*carrier_frame))
+            if (carrier_frame_amp == 0):
+                continue
+            rescaled_frame = carrier_frame * (modulator_frame_amp / carrier_frame_amp)
 
-    for i in range(len(modulator_frames)):
-        carrier_frame = carrier_frames[best_matches[i]]
-        modulator_frame = modulator_frames[i]
-        modulator_frame_amp = np.sqrt(np.sum(modulator_frame*modulator_frame))
-        carrier_frame_amp = np.sqrt(np.sum(carrier_frame*carrier_frame))
-        if (carrier_frame_amp == 0):
-            continue
-        rescaled_frame = carrier_frame * (modulator_frame_amp / carrier_frame_amp)
-
-        if (max(abs(rescaled_frame))) > 1:
-            rescaled_frame /= max(abs(rescaled_frame))
-        output_audio[i*samples_per_frame : i*samples_per_frame + samples_per_frame*2] += rescaled_frame
+            if (max(abs(rescaled_frame))) > 1:
+                rescaled_frame /= max(abs(rescaled_frame))
+            output_audio[i*samples_per_frame : i*samples_per_frame + samples_per_frame*2] += rescaled_frame
+    else:
+        for i in range(len(modulator_frames)):
+            composed_frame = get_carrier(best_matches[i],coefficients[i])
+            output_audio[i*samples_per_frame : i*samples_per_frame + samples_per_frame*2] += composed_frame
 
     wavfile.write(TEMP_DIR / 'out.wav', INTERNAL_SAMPLERATE, output_audio)
 
@@ -184,7 +258,7 @@ def get_audio_as_wav_bytes(path):
 
     return io.BytesIO(bytes(ff_out))
 
-def process(carrier_path, modulator_path, output_path):
+def process(carrier_path, modulator_path, output_path, combination_mode=False):
     if not carrier_path.is_file():
         raise FileNotFoundError(f"Carrier file {carrier_path} not found.")
     if not modulator_path.is_file():
@@ -241,19 +315,28 @@ def process(carrier_path, modulator_path, output_path):
     modulator_bands = make_normalized_bands(modulator_frames, BAND_WIDTH)
 
     print("finding best matches")
-    best_matches = []
-    for i in range(len(modulator_bands)):
-        best_matches.append(find_best_match(carrier_bands,modulator_bands[i]))
+    basis_coefficients = {}
+    if combination_mode:
+        best_matches = np.zeros((len(modulator_bands), MAX_BASIS_WIDTH), np.int32) - np.ones((len(modulator_bands), MAX_BASIS_WIDTH), np.int32)
+        for i in range(len(modulator_bands)):
+            (basis, scalars) =find_best_match(carrier_bands,modulator_bands[i], compose=True)
+            best_matches[i] = basis
+            basis_coefficients[i]= scalars
+    else:
+        best_matches = []
+        for i in range(len(modulator_bands)):
+            best_matches.append(find_best_match(carrier_bands,modulator_bands[i]))
+
 
 
     print("creating output audio")
-    create_output_audio(best_matches, modulator_audio, carrier_frames, modulator_frames, samples_per_frame)
+    create_output_audio(best_matches, basis_coefficients, modulator_audio, carrier_frames, modulator_frames, samples_per_frame)
     
 
     if carrier_is_video:
         outframes_dir = TEMP_DIR / 'outframes'
         outframes_dir.mkdir()
-        build_output_video(frames_dir, outframes_dir, best_matches, 1/frame_length, output_path)
+        build_output_video(frames_dir, outframes_dir, best_matches, basis_coefficients, 1/frame_length, output_path)
     else:
         subprocess.run(
             [
@@ -274,6 +357,7 @@ def main():
     parser.add_argument('carrier_path', type=Path, metavar='carrier_track', help='path to an audio or video file that frames will be taken from')
     parser.add_argument('modulator_path', type=Path, metavar='modulator_track', help='path to an audio or video file that will be reconstructed using the carrier track')
     parser.add_argument('output_path', type=Path, metavar='output_file', help='path to file that will be written to; should have an audio or video file extension (such as .wav, .mp3, .mp4, etc.)')
+    parser.add_argument('--combination-mode', action='store_true', help='enables alternate frame matching and output composition modes')
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tempdir:
         global TEMP_DIR
