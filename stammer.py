@@ -10,6 +10,7 @@ import image_tiling
 import fraction_bits
 from PIL import Image
 import tempfile
+import logging
 
 TEMP_DIR = Path('temp')
 
@@ -24,7 +25,7 @@ def test_command(cmd):
     try:
         subprocess.run(cmd, capture_output=True)
     except FileNotFoundError as error:
-        print(f"ERROR: '{cmd[0]}' not found. Please install it.")
+        logging.error(f"ERROR: '{cmd[0]}' not found. Please install it.")
         raise error
 
 def make_normalized_bands(frames_input,band_width):
@@ -141,7 +142,7 @@ def get_framecount(path):
         ).stdout
 
 def build_output_video(frames_dir, outframes_dir, best_matches, basis_coefficients, framerate, output_path):
-    print("building output video")
+    logging.info("building output video")
     def tesselate_composite(match_row, basis_coefficients, i):
         tiles: List[Image.Image] = []
         bits: List[List[int]] = []
@@ -270,12 +271,12 @@ def process(carrier_path, modulator_path, output_path, combination_mode=False):
         output_is_audio = is_audio_filename(output_path)
         carrier_is_video = not output_is_audio
 
-        print("Calculating video length")
+        logging.info("Calculating video length")
         carrier_duration = float(get_duration(carrier_path))
         carrier_framecount = float(get_framecount(carrier_path))
 
         if not output_is_audio:
-            print("Separating video frames")
+            logging.info("Separating video frames")
             frames_dir = TEMP_DIR / 'frames'
             frames_dir.mkdir()
             subprocess.run(
@@ -295,18 +296,18 @@ def process(carrier_path, modulator_path, output_path, combination_mode=False):
         carrier_is_video = False
         frame_length = DEFAULT_FRAME_LENGTH
     else:
-        print(f"Unrecognized file type: {carrier_path}. Should be audio or video")
+        logging.error(f"Unrecognized file type: {carrier_path}. Should be audio or video")
         return
 
     if not (('video' in modulator_type) or ('audio' in modulator_type)):
-        print(f"Unrecognized file type: {modulator_path}. Should be audio or video")
+        logging.error(f"Unrecognized file type: {modulator_path}. Should be audio or video")
         return
 
-    print("reading audio")
+    logging.info("reading audio")
     _, carrier_audio = wavfile.read(get_audio_as_wav_bytes(carrier_path))
     _, modulator_audio = wavfile.read(get_audio_as_wav_bytes(modulator_path))
 
-    print("analyzing audio")
+    logging.info("analyzing audio")
     samples_per_frame = int(frame_length * INTERNAL_SAMPLERATE)
     carrier_frames = make_frames(carrier_audio, samples_per_frame)
     modulator_frames = make_frames(modulator_audio, samples_per_frame)
@@ -314,7 +315,7 @@ def process(carrier_path, modulator_path, output_path, combination_mode=False):
     carrier_bands = make_normalized_bands(carrier_frames, BAND_WIDTH)
     modulator_bands = make_normalized_bands(modulator_frames, BAND_WIDTH)
 
-    print("finding best matches")
+    logging.info("finding best matches")
     basis_coefficients = {}
     if combination_mode:
         best_matches = np.zeros((len(modulator_bands), MAX_BASIS_WIDTH), np.int32) - np.ones((len(modulator_bands), MAX_BASIS_WIDTH), np.int32)
@@ -329,7 +330,7 @@ def process(carrier_path, modulator_path, output_path, combination_mode=False):
 
 
 
-    print("creating output audio")
+    logging.info("creating output audio")
     create_output_audio(best_matches, basis_coefficients, modulator_audio, carrier_frames, modulator_frames, samples_per_frame)
     
 
@@ -349,6 +350,8 @@ def process(carrier_path, modulator_path, output_path, combination_mode=False):
         )
 
 def main():
+    logging.basicConfig(format='%(message)s', level=logging.INFO)
+
     # check required command line tools
     test_command(['ffmpeg', '-version'])
     test_command(['ffprobe', '-version'])
