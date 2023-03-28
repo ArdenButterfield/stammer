@@ -14,7 +14,10 @@ STAMMER requires python 3, and the following python libraries:
 ```
 numpy
 scipy
+Pillow
 ```
+
+These can be installed by running `pip install -r requirements.txt`.
 
 It also requires the command line utility `ffmpeg`.
 
