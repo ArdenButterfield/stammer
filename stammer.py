@@ -32,74 +32,6 @@ def test_command(cmd):
         logging.error(f"ERROR: '{cmd[0]}' not found. Please install it.")
         raise error
 
-def make_normalized_bands(frames_input,band_width):
-    transforms = np.fft.fft(frames_input)
-    spectra = abs(transforms[:,1:len(transforms[0])//2])
-    split_points = [0]
-    i = 2
-    while i < len(spectra[0]):
-        if int(i) > split_points[-1]:
-            split_points.append(int(i))
-        i *= band_width
-    section_lengths = []
-    for i in range(len(split_points) - 1):
-        section_lengths.append(split_points[i+1]-split_points[i])
-    section_lengths.append(len(spectra[0]) - split_points[-1])
-    bands = np.divide(np.add.reduceat(spectra, split_points, axis=1), section_lengths) # average value in each band
-    vector_magnitudes = np.sqrt((bands * bands).sum(axis=1))
-    vector_magnitudes[vector_magnitudes==0]=1
-    normalized_bands = bands / vector_magnitudes[:,None]
-    
-    return normalized_bands
-
-def make_frames(input_audio, frame_length):
-    if input_audio.dtype != float:
-        intmax = np.iinfo(input_audio.dtype).max
-        input_audio = input_audio.astype(float) / intmax
-
-    # todo: this will get slightly off over time.
-    num_frames = (len(input_audio) // frame_length) - 2
-    
-    window = np.hanning(frame_length * 2)
-    frames = np.zeros((num_frames, frame_length * 2), dtype=input_audio.dtype)
-
-    for i in range(num_frames):
-        a = input_audio[i*frame_length:i*frame_length+frame_length*2]
-        frames[i] = (window * input_audio[i*frame_length:i*frame_length+frame_length*2])
-        
-    return frames
-
-def find_best_match(carrier_bands, modulator_band, compose=False):
-    if not compose:
-        dot_products = np.sum(carrier_bands * modulator_band, axis=1)
-        return np.argmax(dot_products)
-    proj_indices = []
-    coeffs = []
-    pre, post, delta = None, None, None
-    basis_epsilon = 5e-16
-    while (delta is None or delta < 0) and ((not coeffs) or basis_epsilon < np.abs(coeffs[-1])) and ((not proj_indices) or len(proj_indices) == 1 or len(proj_indices) != MAX_BASIS_WIDTH): 
-        dot_products = np.sum(carrier_bands * modulator_band, axis=1)
-        max = np.argmax(dot_products)
-        proj_indices.append(max)
-        orth_band = carrier_bands[proj_indices[-1]]
-        coeffs.append(np.sum(orth_band * modulator_band))
-        decrement = coeffs[-1] * orth_band
-        if not post is None:
-            pre = post
-        else:
-            pre = np.sum(np.ones(len(modulator_band))* np.abs(modulator_band))
-        modulator_band -= decrement
-        post = np.sum(np.ones(len(modulator_band))* np.abs(modulator_band))
-        delta = post - pre
-    if np.abs(proj_indices[-1]) < basis_epsilon or np.abs(coeffs[-1]) < basis_epsilon:
-        proj_indices.pop()
-        coeffs.pop()
-    padding = [0] * (MAX_BASIS_WIDTH - len(proj_indices))
-    proj_indices = proj_indices + padding
-    basis_array = np.asarray(proj_indices, dtype=np.int32)
-    return (basis_array, coeffs + padding)
-
-
 def file_type(path):
     # is the file at path an audio file, video file, or neither?
     return subprocess.run(
@@ -199,38 +131,6 @@ def build_output_video(frames_dir, outframes_dir, matcher, framerate, output_pat
         ],
         check=True
     )
-
-def create_output_audio(best_matches, coefficients, modulator_audio, carrier_frames, modulator_frames, samples_per_frame):
-    output_audio = np.zeros(modulator_audio.shape, dtype=float)
-    def get_carrier(k,c):
-        composite_carrier = None
-        for index, element in enumerate(c):
-            if element == 0:
-                break
-            if index == 0:
-                composite_carrier = carrier_frames[k[index]]*element
-            else:
-                composite_carrier += carrier_frames[k[index]]*element
-        return composite_carrier
-    if type(best_matches) == list:
-        for i in range(len(modulator_frames)):
-            carrier_frame = carrier_frames[best_matches[i]]
-            modulator_frame = modulator_frames[i]
-            modulator_frame_amp = np.sqrt(np.sum(modulator_frame*modulator_frame))
-            carrier_frame_amp = np.sqrt(np.sum(carrier_frame*carrier_frame))
-            if (carrier_frame_amp == 0):
-                continue
-            rescaled_frame = carrier_frame * (modulator_frame_amp / carrier_frame_amp)
-
-            if (max(abs(rescaled_frame))) > 1:
-                rescaled_frame /= max(abs(rescaled_frame))
-            output_audio[i*samples_per_frame : i*samples_per_frame + samples_per_frame*2] += rescaled_frame
-    else:
-        for i in range(len(modulator_frames)):
-            composed_frame = get_carrier(best_matches[i],coefficients[i])
-            output_audio[i*samples_per_frame : i*samples_per_frame + samples_per_frame*2] += composed_frame
-
-    wavfile.write(TEMP_DIR / 'out.wav', INTERNAL_SAMPLERATE, output_audio)
 
 COMMON_AUDIO_EXTS = [
     "wav",
