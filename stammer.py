@@ -169,7 +169,7 @@ def get_audio_as_wav_bytes(path):
 
     return io.BytesIO(bytes(ff_out))
 
-def process(carrier_path, modulator_path, output_path, combination_mode=False):
+def process(carrier_path, modulator_path, output_path, mode):
     if not carrier_path.is_file():
         raise FileNotFoundError(f"Carrier file {carrier_path} not found.")
     if not modulator_path.is_file():
@@ -218,7 +218,7 @@ def process(carrier_path, modulator_path, output_path, combination_mode=False):
     _, modulator_audio = wavfile.read(get_audio_as_wav_bytes(modulator_path))
 
 
-    if combination_mode:
+    if mode == "combination":
         matcher = CombinedFrameAudioMatcher(carrier_audio, modulator_audio, INTERNAL_SAMPLERATE, frame_length)
     else:
         matcher = BasicAudioMatcher(carrier_audio, modulator_audio, INTERNAL_SAMPLERATE, frame_length)
@@ -254,7 +254,9 @@ def main():
     parser.add_argument('carrier_path', type=Path, metavar='carrier_track', help='path to an audio or video file that frames will be taken from')
     parser.add_argument('modulator_path', type=Path, metavar='modulator_track', help='path to an audio or video file that will be reconstructed using the carrier track')
     parser.add_argument('output_path', type=Path, metavar='output_file', help='path to file that will be written to; should have an audio or video file extension (such as .wav, .mp3, .mp4, etc.)')
-    parser.add_argument('--combination-mode', action='store_true', help='enables alternate frame matching and output composition modes')
+    parser.add_argument('-m', '--mode', choices=('basic', 'combination'), default='basic', help="""Which algorithm Stammer will use.
+        basic: replace each frame in the modulator with the most similar frame in the carrier.
+        combination: replace each frame in the modulator with a linear combination of several frames in the carrier, to more closely approximte it.""")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tempdir:
         global TEMP_DIR
