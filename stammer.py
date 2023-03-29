@@ -169,8 +169,8 @@ def get_audio_as_wav_bytes(path):
 
     return io.BytesIO(bytes(ff_out))
 
-def process(carrier_path, modulator_path, output_path, combination_mode=False, custom_frame_length=0):
-    custom_frame_length = float(custom_frame_length)
+def process(carrier_path, modulator_path, output_path, custom_frame_length, combination_mode=False):
+    print(custom_frame_length)
     if not carrier_path.is_file():
         raise FileNotFoundError(f"Carrier file {carrier_path} not found.")
     if not modulator_path.is_file():
@@ -184,11 +184,12 @@ def process(carrier_path, modulator_path, output_path, combination_mode=False, c
 
         logging.info("Calculating video length")
         carrier_duration = float(get_duration(carrier_path))
-        if custom_frame_length == 0:
-            carrier_framecount = float(get_framecount(carrier_path))
-            frame_length = carrier_duration / carrier_framecount
+        carrier_framecount = float(get_framecount(carrier_path))
+        real_frame_length = carrier_duration / carrier_framecount
+        if custom_frame_length is None:
+            frame_length = real_frame_length
         else:
-            frame_length = custom_frame_length
+            frame_length = float(custom_frame_length)
 
         if not output_is_audio:
             logging.info("Separating video frames")
@@ -204,14 +205,12 @@ def process(carrier_path, modulator_path, output_path, combination_mode=False, c
                 check=True
             )
 
-        
-
     elif 'audio' in carrier_type:
         carrier_is_video = False
-        if custom_frame_length == 0:
+        if custom_frame_length is None:
             frame_length = DEFAULT_FRAME_LENGTH
         else:
-            frame_length = custom_frame_length
+            frame_length = float(custom_frame_length)
     else:
         logging.error(f"Unrecognized file type: {carrier_path}. Should be audio or video")
         return
@@ -238,7 +237,7 @@ def process(carrier_path, modulator_path, output_path, combination_mode=False, c
     if carrier_is_video:
         outframes_dir = TEMP_DIR / 'outframes'
         outframes_dir.mkdir()
-        build_output_video(frames_dir, outframes_dir, matcher, 1/frame_length, output_path)
+        build_output_video(frames_dir, outframes_dir, matcher, 1/real_frame_length, output_path)
     else:
         subprocess.run(
             [
@@ -261,13 +260,12 @@ def main():
     parser.add_argument('carrier_path', type=Path, metavar='carrier_track', help='path to an audio or video file that frames will be taken from')
     parser.add_argument('modulator_path', type=Path, metavar='modulator_track', help='path to an audio or video file that will be reconstructed using the carrier track')
     parser.add_argument('output_path', type=Path, metavar='output_file', help='path to file that will be written to; should have an audio or video file extension (such as .wav, .mp3, .mp4, etc.)')
+    parser.add_argument('--custom-frame-length', '-f', help='uses this number as frame length, in seconds. defaults to 0.04 seconds (1/25th of a second) for audio, or 1 frame for video')
     parser.add_argument('--combination-mode', action='store_true', help='enables alternate frame matching and output composition modes')
-    parser.add_argument('--custom_frame_length', '-f', help='uses this number as frame length, in seconds. defaults to 0.04 seconds (1/25th of a second) for audio, or 1 frame for video')
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tempdir:
         global TEMP_DIR
         TEMP_DIR = Path(tempdir)
-        #print(vars(args))
         process(**vars(args))
 
 
