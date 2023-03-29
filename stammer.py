@@ -170,7 +170,6 @@ def get_audio_as_wav_bytes(path):
     return io.BytesIO(bytes(ff_out))
 
 def process(carrier_path, modulator_path, output_path, custom_frame_length, combination_mode=False):
-    print(custom_frame_length)
     if not carrier_path.is_file():
         raise FileNotFoundError(f"Carrier file {carrier_path} not found.")
     if not modulator_path.is_file():
@@ -260,7 +259,7 @@ def main():
     parser.add_argument('carrier_path', type=Path, metavar='carrier_track', help='path to an audio or video file that frames will be taken from')
     parser.add_argument('modulator_path', type=Path, metavar='modulator_track', help='path to an audio or video file that will be reconstructed using the carrier track')
     parser.add_argument('output_path', type=Path, metavar='output_file', help='path to file that will be written to; should have an audio or video file extension (such as .wav, .mp3, .mp4, etc.)')
-    parser.add_argument('--custom-frame-length', '-f', help='uses this number as frame length, in seconds. defaults to 0.04 seconds (1/25th of a second) for audio, or 1 frame for video')
+    parser.add_argument('--custom-frame-length', '-f', help='uses this number as frame length, in seconds. defaults to 0.04 seconds (1/25th of a second) for audio, or the real frame rate for video')
     parser.add_argument('--combination-mode', action='store_true', help='enables alternate frame matching and output composition modes')
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tempdir:
