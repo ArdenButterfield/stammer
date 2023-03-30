@@ -179,7 +179,7 @@ def get_audio_as_wav_bytes(path):
 
     return io.BytesIO(bytes(ff_out))
 
-def process(carrier_path, modulator_path, output_path, custom_frame_length, combination_mode=False):
+def process(carrier_path, modulator_path, output_path, custom_frame_length, mode):
     if not carrier_path.is_file():
         raise FileNotFoundError(f"Carrier file {carrier_path} not found.")
     if not modulator_path.is_file():
