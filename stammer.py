@@ -79,7 +79,7 @@ def get_framecount(path):
 
 
 
-def build_output_video(frames_dir, outframes_dir, matcher, framerate, output_path):
+def build_output_video(frames_dir, outframes_dir, matcher, video_frame_length, audio_frame_length, output_path):
     logging.info("building output video")
     
     def tesselate_composite(match_row, basis_coefficients, i):
@@ -105,22 +105,32 @@ def build_output_video(frames_dir, outframes_dir, matcher, framerate, output_pat
         output_frame.save(outframes_dir / f'frame{i:06d}.png')
 
     if type(matcher) in (BasicAudioMatcher, UniqueAudioMatcher):
-        for i, match_num in enumerate(matcher.get_best_matches()):
-            shutil.copy(frames_dir / f'frame{match_num+1:06d}.png', outframes_dir / f'frame{i:06d}.png')
-
+        for video_frame_i in range(int(len(matcher.get_best_matches()) * audio_frame_length / video_frame_length)):
+            elapsed_time = video_frame_i * video_frame_length
+            audio_frame_i = int(elapsed_time / audio_frame_length)
+            time_past_start_of_audio_frame = elapsed_time - (audio_frame_i * audio_frame_length)
+            match_num = matcher.get_best_matches()[audio_frame_i]
+            elapsed_time_in_carrier = match_num * audio_frame_length + time_past_start_of_audio_frame
+            carrier_video_frame = int(elapsed_time_in_carrier / video_frame_length)
+            shutil.copy(frames_dir / f'frame{carrier_video_frame+1:06d}.png', outframes_dir / f'frame{video_frame_i:06d}.png')
     elif type(matcher) == CombinedFrameAudioMatcher:
         best_matches = matcher.get_best_matches()
         basis_coefficients = matcher.get_basis_coefficients()
-        for i, match_row in enumerate(best_matches):
-            tesselate_composite(match_row=match_row, basis_coefficients=basis_coefficients[i], i=i)
-        
+        for video_frame_i in range(int(len(matcher.get_best_matches()) * audio_frame_length / video_frame_length)):
+            elapsed_time = video_frame_i * video_frame_length
+            audio_frame_i = int(elapsed_time / audio_frame_length)
+            time_past_start_of_audio_frame = elapsed_time - (audio_frame_i * audio_frame_length)
+            match_row = matcher.get_best_matches()[audio_frame_i]
+            match_row = [int((i * audio_frame_length + time_past_start_of_audio_frame)/video_frame_length) for i in match_row]
+            tesselate_composite(match_row=match_row, basis_coefficients=basis_coefficients[audio_frame_i], i=video_frame_i)
+
     subprocess.run(
         [
             'ffmpeg',
             '-hide_banner',
             '-loglevel', 'error',
             '-y',
-            '-framerate', str(framerate),
+            '-framerate', str(1/video_frame_length),
             '-i', str(outframes_dir / 'frame%06d.png'),
             '-i', str(TEMP_DIR / 'out.wav'),
             '-c:a', 'aac',
@@ -169,7 +179,7 @@ def get_audio_as_wav_bytes(path):
 
     return io.BytesIO(bytes(ff_out))
 
-def process(carrier_path, modulator_path, output_path, mode):
+def process(carrier_path, modulator_path, output_path, custom_frame_length, mode):
     if not carrier_path.is_file():
         raise FileNotFoundError(f"Carrier file {carrier_path} not found.")
     if not modulator_path.is_file():
@@ -184,6 +194,11 @@ def process(carrier_path, modulator_path, output_path, mode):
         logging.info("Calculating video length")
         carrier_duration = float(get_duration(carrier_path))
         carrier_framecount = float(get_framecount(carrier_path))
+        real_frame_length = carrier_duration / carrier_framecount
+        if custom_frame_length is None:
+            frame_length = real_frame_length
+        else:
+            frame_length = float(custom_frame_length)
 
         if not output_is_audio:
             logging.info("Separating video frames")
@@ -199,12 +214,12 @@ def process(carrier_path, modulator_path, output_path, mode):
                 check=True
             )
 
-        frame_length = carrier_duration / carrier_framecount
-
-
     elif 'audio' in carrier_type:
         carrier_is_video = False
-        frame_length = DEFAULT_FRAME_LENGTH
+        if custom_frame_length is None:
+            frame_length = DEFAULT_FRAME_LENGTH
+        else:
+            frame_length = float(custom_frame_length)
     else:
         logging.error(f"Unrecognized file type: {carrier_path}. Should be audio or video")
         return
@@ -232,7 +247,7 @@ def process(carrier_path, modulator_path, output_path, mode):
     if carrier_is_video:
         outframes_dir = TEMP_DIR / 'outframes'
         outframes_dir.mkdir()
-        build_output_video(frames_dir, outframes_dir, matcher, 1/frame_length, output_path)
+        build_output_video(frames_dir, outframes_dir, matcher, real_frame_length, frame_length, output_path)
     else:
         subprocess.run(
             [
@@ -255,6 +270,7 @@ def main():
     parser.add_argument('carrier_path', type=Path, metavar='carrier_track', help='path to an audio or video file that frames will be taken from')
     parser.add_argument('modulator_path', type=Path, metavar='modulator_track', help='path to an audio or video file that will be reconstructed using the carrier track')
     parser.add_argument('output_path', type=Path, metavar='output_file', help='path to file that will be written to; should have an audio or video file extension (such as .wav, .mp3, .mp4, etc.)')
+    parser.add_argument('--custom-frame-length', '-f', help='uses this number as frame length, in seconds. defaults to 0.04 seconds (1/25th of a second) for audio, or the real frame rate for video')
     parser.add_argument('-m', '--mode', choices=('basic', 'combination', 'unique'), default='basic', help="""Which algorithm Stammer will use.
         basic: replace each frame in the modulator with the most similar frame in the carrier.
         combination: replace each frame in the modulator with a linear combination of several frames in the carrier, to more closely approximte it.
