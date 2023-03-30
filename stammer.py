@@ -14,7 +14,7 @@ import logging
 
 import image_tiling
 import fraction_bits
-from audio_matching import BasicAudioMatcher, CombinedFrameAudioMatcher
+from audio_matching import BasicAudioMatcher, CombinedFrameAudioMatcher, UniqueAudioMatcher
 
 TEMP_DIR = Path('temp')
 
@@ -104,7 +104,7 @@ def build_output_video(frames_dir, outframes_dir, matcher, framerate, output_pat
                     output_frame.paste(tb,(x0, y0 + tb.height))
         output_frame.save(outframes_dir / f'frame{i:06d}.png')
 
-    if type(matcher) == BasicAudioMatcher:
+    if type(matcher) in (BasicAudioMatcher, UniqueAudioMatcher):
         for i, match_num in enumerate(matcher.get_best_matches()):
             shutil.copy(frames_dir / f'frame{match_num+1:06d}.png', outframes_dir / f'frame{i:06d}.png')
 
@@ -218,11 +218,12 @@ def process(carrier_path, modulator_path, output_path, mode):
     _, modulator_audio = wavfile.read(get_audio_as_wav_bytes(modulator_path))
 
 
-    if mode == "combination":
-        matcher = CombinedFrameAudioMatcher(carrier_audio, modulator_audio, INTERNAL_SAMPLERATE, frame_length)
-    else:
+    if mode == "basic":
         matcher = BasicAudioMatcher(carrier_audio, modulator_audio, INTERNAL_SAMPLERATE, frame_length)
-
+    elif mode == "combination":
+        matcher = CombinedFrameAudioMatcher(carrier_audio, modulator_audio, INTERNAL_SAMPLERATE, frame_length)
+    elif mode == "unique":
+        matcher = UniqueAudioMatcher(carrier_audio, modulator_audio, INTERNAL_SAMPLERATE, frame_length)
 
     logging.info("creating output audio")
     matcher.make_output_audio(TEMP_DIR / 'out.wav')
@@ -254,9 +255,10 @@ def main():
     parser.add_argument('carrier_path', type=Path, metavar='carrier_track', help='path to an audio or video file that frames will be taken from')
     parser.add_argument('modulator_path', type=Path, metavar='modulator_track', help='path to an audio or video file that will be reconstructed using the carrier track')
     parser.add_argument('output_path', type=Path, metavar='output_file', help='path to file that will be written to; should have an audio or video file extension (such as .wav, .mp3, .mp4, etc.)')
-    parser.add_argument('-m', '--mode', choices=('basic', 'combination'), default='basic', help="""Which algorithm Stammer will use.
+    parser.add_argument('-m', '--mode', choices=('basic', 'combination', 'unique'), default='basic', help="""Which algorithm Stammer will use.
         basic: replace each frame in the modulator with the most similar frame in the carrier.
-        combination: replace each frame in the modulator with a linear combination of several frames in the carrier, to more closely approximte it.""")
+        combination: replace each frame in the modulator with a linear combination of several frames in the carrier, to more closely approximte it.
+        unique: limit each carrier frame to only appear once. If the carrier is longer than the modulator, some carrier frames will not be played, if it is shorter than the modulator, the modulator will be trimmed to thee length of the carrier.""")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tempdir:
         global TEMP_DIR
