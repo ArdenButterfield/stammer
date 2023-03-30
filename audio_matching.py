@@ -169,7 +169,8 @@ class CombinedFrameAudioMatcher(AudioMatcher):
         output_audio = np.zeros(self.modulator.shape, dtype=float)
         for i in range(len(self.modulator_frames)):
             composed_frame = self.get_carrier(self.best_matches[i],self.basis_coefficients[i])
-            output_audio[i*self.samples_per_frame : i*self.samples_per_frame + self.samples_per_frame*2] += composed_frame
+            if not composed_frame is None:
+                output_audio[i*self.samples_per_frame : i*self.samples_per_frame + self.samples_per_frame*2] += composed_frame
         return output_audio
 
     def get_basis_coefficients(self):
@@ -181,6 +182,7 @@ class UniqueAudioMatcher(BasicAudioMatcher):
         if len(self.carrier_bands) < len(self.modulator_bands):
             logging.warning(f"Carrier is shorter than modulator ({len(self.carrier_bands)} frames vs {len(self.modulator_bands)} frames). Trimming modulator to the length of carrier")
             self.modulator_bands = self.modulator_bands[:len(self.carrier_bands)]
+            self.modulator_frames = self.modulator_frames[:len(self.carrier_frames)]
         # Build a 2-d array where cell i,j contains the dot product of modulator frame i and carrier frame j
         dot = lambda row: np.sum(self.carrier_bands * row, axis = 1)
         cost_matrix = np.apply_along_axis(dot, 1, self.modulator_bands)
