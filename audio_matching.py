@@ -1,5 +1,8 @@
 import numpy as np
 from scipy.io import wavfile
+from scipy.optimize import linear_sum_assignment
+import logging
+
 
 class AudioMatcher:
     # Base Class
@@ -171,3 +174,16 @@ class CombinedFrameAudioMatcher(AudioMatcher):
 
     def get_basis_coefficients(self):
     	return self.basis_coefficients
+
+
+class UniqueAudioMatcher(BasicAudioMatcher):
+    def find_matches(self):
+        if len(self.carrier_bands) < len(self.modulator_bands):
+            logging.warning(f"Carrier is shorter than modulator ({len(self.carrier_bands)} frames vs {len(self.modulator_bands)} frames). Trimming modulator to the length of carrier")
+            self.modulator_bands = self.modulator_bands[:len(self.carrier_bands)]
+        # Build a 2-d array where cell i,j contains the dot product of modulator frame i and carrier frame j
+        dot = lambda row: np.sum(self.carrier_bands * row, axis = 1)
+        cost_matrix = np.apply_along_axis(dot, 1, self.modulator_bands)
+
+        row_ind, col_ind = linear_sum_assignment(cost_matrix, maximize=True)
+        self.best_matches = col_ind
