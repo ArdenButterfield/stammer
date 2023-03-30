@@ -79,7 +79,7 @@ def get_framecount(path):
 
 
 
-def build_output_video(frames_dir, outframes_dir, matcher, framerate, output_path):
+def build_output_video(frames_dir, outframes_dir, matcher, video_frame_length, audio_frame_length, output_path):
     logging.info("building output video")
     
     def tesselate_composite(match_row, basis_coefficients, i):
@@ -105,22 +105,33 @@ def build_output_video(frames_dir, outframes_dir, matcher, framerate, output_pat
         output_frame.save(outframes_dir / f'frame{i:06d}.png')
 
     if type(matcher) == BasicAudioMatcher:
-        for i, match_num in enumerate(matcher.get_best_matches()):
-            shutil.copy(frames_dir / f'frame{match_num+1:06d}.png', outframes_dir / f'frame{i:06d}.png')
+        for video_frame_i in range(int(len(matcher.get_best_matches()) * audio_frame_length / video_frame_length)):
+            elapsed_time = video_frame_i * video_frame_length
+            audio_frame_i = int(elapsed_time / audio_frame_length)
+            time_past_start_of_audio_frame = elapsed_time - (audio_frame_i * audio_frame_length)
+            match_num = matcher.get_best_matches()[audio_frame_i]
+            elapsed_time_in_carrier = match_num * audio_frame_length + time_past_start_of_audio_frame
+            carrier_video_frame = int(elapsed_time_in_carrier / video_frame_length)
+            shutil.copy(frames_dir / f'frame{carrier_video_frame+1:06d}.png', outframes_dir / f'frame{video_frame_i:06d}.png')
 
     elif type(matcher) == CombinedFrameAudioMatcher:
         best_matches = matcher.get_best_matches()
         basis_coefficients = matcher.get_basis_coefficients()
-        for i, match_row in enumerate(best_matches):
-            tesselate_composite(match_row=match_row, basis_coefficients=basis_coefficients[i], i=i)
-        
+        for video_frame_i in range(int(len(matcher.get_best_matches()) * audio_frame_length / video_frame_length)):
+            elapsed_time = video_frame_i * video_frame_length
+            audio_frame_i = int(elapsed_time / audio_frame_length)
+            time_past_start_of_audio_frame = elapsed_time - (audio_frame_i * audio_frame_length)
+            match_row = matcher.get_best_matches()[audio_frame_i]
+            match_row = [int((i * audio_frame_length + time_past_start_of_audio_frame)/video_frame_length) for i in match_row]
+            tesselate_composite(match_row=match_row, basis_coefficients=basis_coefficients[audio_frame_i], i=video_frame_i)
+
     subprocess.run(
         [
             'ffmpeg',
             '-hide_banner',
             '-loglevel', 'error',
             '-y',
-            '-framerate', str(framerate),
+            '-framerate', str(1/video_frame_length),
             '-i', str(outframes_dir / 'frame%06d.png'),
             '-i', str(TEMP_DIR / 'out.wav'),
             '-c:a', 'aac',
@@ -236,7 +247,7 @@ def process(carrier_path, modulator_path, output_path, custom_frame_length, comb
     if carrier_is_video:
         outframes_dir = TEMP_DIR / 'outframes'
         outframes_dir.mkdir()
-        build_output_video(frames_dir, outframes_dir, matcher, 1/real_frame_length, output_path)
+        build_output_video(frames_dir, outframes_dir, matcher, real_frame_length, frame_length, output_path)
     else:
         subprocess.run(
             [
