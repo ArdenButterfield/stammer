@@ -79,15 +79,16 @@ def get_framecount(path):
 
 
 
-def build_output_video(frames_dir, outframes_dir, matcher, video_frame_length, audio_frame_length, output_path):
+def build_output_video(frames_dir, outframes_dir, matcher, video_frame_length, audio_frame_length, carrier_framecount, output_path):
     logging.info("building output video")
     
-    def tesselate_composite(match_row, basis_coefficients, i):
+    def tesselate_composite(match_row, basis_coefficients, carrier_framecount, i):
         tiles: List[Image.Image] = []
         bits: List[List[int]] = []
         used_coeffs = [(j, coefficient) for j, coefficient in enumerate(basis_coefficients) if coefficient != 0]
         for k, coeff in used_coeffs:
-            tiles.append(Image.open(frames_dir / f'frame{match_row[k]+1:06d}.png'))
+            frame_num = min(match_row[k], carrier_framecount - 1)
+            tiles.append(Image.open(frames_dir / f'frame{frame_num+1:06d}.png'))
             hot_bits,_ = fraction_bits.as_array(coeff)
             bits.append(hot_bits)
         tesselation = image_tiling.Tiling(height=tiles[0].height,width=tiles[0].width)
@@ -112,6 +113,7 @@ def build_output_video(frames_dir, outframes_dir, matcher, video_frame_length, a
             match_num = matcher.get_best_matches()[audio_frame_i]
             elapsed_time_in_carrier = match_num * audio_frame_length + time_past_start_of_audio_frame
             carrier_video_frame = int(elapsed_time_in_carrier / video_frame_length)
+            carrier_video_frame = min(carrier_video_frame, carrier_framecount - 1)
             shutil.copy(frames_dir / f'frame{carrier_video_frame+1:06d}.png', outframes_dir / f'frame{video_frame_i:06d}.png')
     elif type(matcher) == CombinedFrameAudioMatcher:
         best_matches = matcher.get_best_matches()
@@ -122,7 +124,7 @@ def build_output_video(frames_dir, outframes_dir, matcher, video_frame_length, a
             time_past_start_of_audio_frame = elapsed_time - (audio_frame_i * audio_frame_length)
             match_row = matcher.get_best_matches()[audio_frame_i]
             match_row = [int((i * audio_frame_length + time_past_start_of_audio_frame)/video_frame_length) for i in match_row]
-            tesselate_composite(match_row=match_row, basis_coefficients=basis_coefficients[audio_frame_i], i=video_frame_i)
+            tesselate_composite(match_row, basis_coefficients[audio_frame_i], carrier_framecount, video_frame_i)
 
     subprocess.run(
         [
@@ -186,13 +188,15 @@ def process(carrier_path, modulator_path, output_path, custom_frame_length, mode
         raise FileNotFoundError(f"Modulator file {modulator_path} not found.")
     carrier_type = file_type(carrier_path)
     modulator_type = file_type(modulator_path)
+    carrier_duration = float(get_duration(carrier_path))
+    modulator_duration = float(get_duration(modulator_path))
 
     if 'video' in carrier_type:
         output_is_audio = is_audio_filename(output_path)
         carrier_is_video = not output_is_audio
 
         logging.info("Calculating video length")
-        carrier_duration = float(get_duration(carrier_path))
+        
         carrier_framecount = float(get_framecount(carrier_path))
         real_frame_length = carrier_duration / carrier_framecount
         if custom_frame_length is None:
@@ -227,7 +231,8 @@ def process(carrier_path, modulator_path, output_path, custom_frame_length, mode
     if not (('video' in modulator_type) or ('audio' in modulator_type)):
         logging.error(f"Unrecognized file type: {modulator_path}. Should be audio or video")
         return
-
+    frame_length = min(frame_length, carrier_duration / 3)
+    frame_length = min(frame_length, modulator_duration / 3)
     logging.info("reading audio")
     _, carrier_audio = wavfile.read(get_audio_as_wav_bytes(carrier_path))
     _, modulator_audio = wavfile.read(get_audio_as_wav_bytes(modulator_path))
@@ -247,7 +252,7 @@ def process(carrier_path, modulator_path, output_path, custom_frame_length, mode
     if carrier_is_video:
         outframes_dir = TEMP_DIR / 'outframes'
         outframes_dir.mkdir()
-        build_output_video(frames_dir, outframes_dir, matcher, real_frame_length, frame_length, output_path)
+        build_output_video(frames_dir, outframes_dir, matcher, real_frame_length, frame_length, carrier_framecount, output_path)
     else:
         subprocess.run(
             [
