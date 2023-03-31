@@ -113,7 +113,7 @@ def build_output_video(frames_dir, outframes_dir, matcher, video_frame_length, a
             match_num = matcher.get_best_matches()[audio_frame_i]
             elapsed_time_in_carrier = match_num * audio_frame_length + time_past_start_of_audio_frame
             carrier_video_frame = int(elapsed_time_in_carrier / video_frame_length)
-            carrier_video_frame = min(carrier_video_frame, carrier_framecount - 1)
+            carrier_video_frame = min(carrier_video_frame, int(carrier_framecount - 1))
             shutil.copy(frames_dir / f'frame{carrier_video_frame+1:06d}.png', outframes_dir / f'frame{video_frame_i:06d}.png')
     elif type(matcher) == CombinedFrameAudioMatcher:
         best_matches = matcher.get_best_matches()
