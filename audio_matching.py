@@ -31,7 +31,7 @@ class AudioMatcher:
 
         for i in range(num_frames):
             a = input_audio[i*frame_length:i*frame_length+frame_length*2]
-            frames[i] = (window * input_audio[i*frame_length:i*frame_length+frame_length*2])
+            frames[i] = (window * a)
             
         return frames
 
@@ -77,6 +77,9 @@ class AudioMatcher:
         output_audio = self.build_output_audio()
 
         wavfile.write(destination_path, self.samplerate, output_audio)
+    
+    def print_progress(self,inv_len,i):
+        print(f"{int(inv_len*i*100)}%",end='     \r')
 
 
 class BasicAudioMatcher(AudioMatcher):
@@ -86,8 +89,10 @@ class BasicAudioMatcher(AudioMatcher):
 
     def find_matches(self):
         self.best_matches = []
+        inv_len = 1.0/len(self.modulator_bands)
         for i in range(len(self.modulator_bands)):
             self.best_matches.append(self.best_match(self.modulator_bands[i]))
+            self.print_progress(inv_len,i)
 
     def get_rescaled_frame(self, carrier_frame, modulator_frame):
         # Match RMS loudness of modulator frame
@@ -167,10 +172,12 @@ class CombinedFrameAudioMatcher(AudioMatcher):
 
     def build_output_audio(self):
         output_audio = np.zeros(self.modulator.shape, dtype=float)
+        inv_len = len(self.modulator_frames)
         for i in range(len(self.modulator_frames)):
             composed_frame = self.get_carrier(self.best_matches[i],self.basis_coefficients[i])
             if not composed_frame is None:
                 output_audio[i*self.samples_per_frame : i*self.samples_per_frame + self.samples_per_frame*2] += composed_frame
+            self.print_progress(inv_len,i)
         return output_audio
 
     def get_basis_coefficients(self):

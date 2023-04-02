@@ -37,8 +37,8 @@ class VideoHandler:
 
         self.frames_written = 0
     
-    def get_frame(self):
-        raise NotImplementedError
+    def get_frame(self,idx):
+        assert(idx < self.framecount)
 
     def write_frame(self):
         self.frames_written += 1
@@ -70,7 +70,7 @@ def get_output_cmd(handler: VideoHandler,input):
         '!inputs!',
         '-c:a', 'aac',
         '-c:v', 'libx264',
-        '-crf', '26',
+        '-crf', '20',
         '-pix_fmt', 'yuv420p',
         '-shortest',
         str(handler.output_path)
@@ -87,6 +87,7 @@ def get_output_cmd(handler: VideoHandler,input):
 
 class VideoHandlerDisk(VideoHandler):
     def get_frame(self,idx):
+        super().get_frame(idx)
         f = open(self.frames_dir / f"frame{idx:06d}.png", 'rb')
         return f
 
@@ -120,7 +121,8 @@ class VideoHandlerMem(VideoHandler):
         self.cache_hits = 0
 
         self.frame_length_max = self.frame_length / max(self.frame_length,self.matcher.frame_length)
-        self.set_min_cached_frames(2)
+        self.frames_backtrack = 0
+        self.frames_lookahead = int(max(1.0/self.frame_length_max,2))
         
         self.out_proc = self.__create_output_proc()
 
@@ -135,7 +137,7 @@ class VideoHandlerMem(VideoHandler):
         self.cache.decay /= self.frames_lookahead
 
     def __get_video_frames_mem(self,start_frame: int,end_frame: int):
-        start_time = start_frame * self.matcher.frame_length
+        start_time = start_frame * self.frame_length
         call = apply_color_mode([
                 'ffmpeg',
                 '-loglevel', 'error',
@@ -191,6 +193,7 @@ class VideoHandlerMem(VideoHandler):
             self.cache.set_frame(idx,frame_slice)
     
     def get_frame(self,idx) -> io.BytesIO:
+        super().get_frame(idx)
         self.cache.process()
         
         if self.cache.item_usable(idx):
@@ -207,8 +210,6 @@ class VideoHandlerMem(VideoHandler):
         frame.seek(0)
         f = frame.read()
         self.out_proc.stdin.write(f)
-
-    def lerp(a, b, t): return (1 - t) * a + t * b
 
     def get_progress_strings(self):
         strs = super().get_progress_strings()
