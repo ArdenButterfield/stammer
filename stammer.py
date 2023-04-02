@@ -8,6 +8,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import io
+
 from PIL import Image
 import tempfile
 import logging
@@ -15,6 +17,9 @@ import logging
 import image_tiling
 import fraction_bits
 from audio_matching import BasicAudioMatcher, CombinedFrameAudioMatcher, UniqueAudioMatcher
+import video_out
+from video_out import VideoHandler, VideoHandlerDisk, VideoHandlerMem
+
 
 TEMP_DIR = Path('temp')
 
@@ -24,6 +29,20 @@ DEFAULT_FRAME_LENGTH = 1/25 # Seconds
 
 BAND_WIDTH = 1.2
 INTERNAL_SAMPLERATE = 44100 # Hz
+
+
+# max number of frames stored in memory
+MEM_DECAY_MAX = 500
+
+COMMON_AUDIO_EXTS = [
+    "wav",
+    "wv",
+    "mp3",
+    "m4a",
+    "aac",
+    "ogg",
+    "opus",
+]
 
 def test_command(cmd):
     try:
@@ -67,8 +86,8 @@ def get_framecount(path):
                 'ffprobe',
                 '-v', 'error',
                 '-select_streams', 'v:0',
-                '-count_frames',
-                '-show_entries', 'stream=nb_read_frames',
+                '-count_packets',
+                '-show_entries', 'stream=nb_read_packets',
                 '-print_format', 'csv=p=0',
                 str(path)
             ],
@@ -79,16 +98,16 @@ def get_framecount(path):
 
 
 
-def build_output_video(frames_dir, outframes_dir, matcher, video_frame_length, audio_frame_length, carrier_framecount, output_path):
+def build_output_video(video_handler: VideoHandler, matcher):
     logging.info("building output video")
     
-    def tesselate_composite(match_row, basis_coefficients, carrier_framecount, i):
+    def tesselate_composite(match_row, basis_coefficients, i):
         tiles: List[Image.Image] = []
         bits: List[List[int]] = []
         used_coeffs = [(j, coefficient) for j, coefficient in enumerate(basis_coefficients) if coefficient != 0]
         for k, coeff in used_coeffs:
-            frame_num = min(match_row[k], carrier_framecount - 1)
-            tiles.append(Image.open(frames_dir / f'frame{frame_num+1:06d}.png'))
+            frame_num = min(match_row[k], video_handler.framecount - 1)
+            tiles.append(Image.open(video_handler.get_frame(frame_num+1)))
             hot_bits,_ = fraction_bits.as_array(coeff)
             bits.append(hot_bits)
         tesselation = image_tiling.Tiling(height=tiles[0].height,width=tiles[0].width)
@@ -103,64 +122,44 @@ def build_output_video(frames_dir, outframes_dir, matcher, video_frame_length, a
                 output_frame.paste(tb, (x0,y0))
                 if do_tile:
                     output_frame.paste(tb,(x0, y0 + tb.height))
-        output_frame.save(outframes_dir / f'frame{i:06d}.png')
+        
+        img_bytes = io.BytesIO()
+        output_frame.save(img_bytes,format="PNG") 
+        video_handler.write_frame(i, img_bytes)
+    
+    video_frame_length = video_handler.frame_length
+    audio_frame_length = matcher.frame_length
+
+    best_matches = matcher.get_best_matches()
 
     if type(matcher) in (BasicAudioMatcher, UniqueAudioMatcher):
-        for video_frame_i in range(int(len(matcher.get_best_matches()) * audio_frame_length / video_frame_length)):
+        for video_frame_i in range(int(len(best_matches) * audio_frame_length / video_frame_length)):
             elapsed_time = video_frame_i * video_frame_length
             audio_frame_i = int(elapsed_time / audio_frame_length)
             time_past_start_of_audio_frame = elapsed_time - (audio_frame_i * audio_frame_length)
-            match_num = matcher.get_best_matches()[audio_frame_i]
+            match_num = best_matches[audio_frame_i]
             elapsed_time_in_carrier = match_num * audio_frame_length + time_past_start_of_audio_frame
             carrier_video_frame = int(elapsed_time_in_carrier / video_frame_length)
-            carrier_video_frame = min(carrier_video_frame, int(carrier_framecount - 1))
-            shutil.copy(frames_dir / f'frame{carrier_video_frame+1:06d}.png', outframes_dir / f'frame{video_frame_i:06d}.png')
+            carrier_video_frame = min(carrier_video_frame, int(video_handler.framecount - 1))
+            video_handler.write_frame(video_frame_i,video_handler.get_frame(carrier_video_frame+1))
+
     elif type(matcher) == CombinedFrameAudioMatcher:
-        best_matches = matcher.get_best_matches()
         basis_coefficients = matcher.get_basis_coefficients()
-        for video_frame_i in range(int(len(matcher.get_best_matches()) * audio_frame_length / video_frame_length)):
+        for video_frame_i in range(int(len(best_matches) * audio_frame_length / video_frame_length)):
             elapsed_time = video_frame_i * video_frame_length
             audio_frame_i = int(elapsed_time / audio_frame_length)
             time_past_start_of_audio_frame = elapsed_time - (audio_frame_i * audio_frame_length)
-            match_row = matcher.get_best_matches()[audio_frame_i]
+            match_row = best_matches[audio_frame_i]
             match_row = [int((i * audio_frame_length + time_past_start_of_audio_frame)/video_frame_length) for i in match_row]
-            tesselate_composite(match_row, basis_coefficients[audio_frame_i], carrier_framecount, video_frame_i)
-
-    subprocess.run(
-        [
-            'ffmpeg',
-            '-hide_banner',
-            '-loglevel', 'error',
-            '-y',
-            '-framerate', str(1/video_frame_length),
-            '-i', str(outframes_dir / 'frame%06d.png'),
-            '-i', str(TEMP_DIR / 'out.wav'),
-            '-c:a', 'aac',
-            '-shortest',
-            '-c:v', 'libx264',
-            '-pix_fmt', 'yuv420p',
-            str(output_path)
-        ],
-        check=True
-    )
-
-COMMON_AUDIO_EXTS = [
-    "wav",
-    "wv",
-    "mp3",
-    "m4a",
-    "aac",
-    "ogg",
-    "opus",
-]
+            tesselate_composite(match_row, basis_coefficients[audio_frame_i], video_frame_i)
+    
+    # signals VideoHandlerDisk to start encoding
+    video_handler.complete()
 
 def is_audio_filename(name):
-    import os.path
-    return os.path.splitext(name)[1][1:] in COMMON_AUDIO_EXTS
+    return Path(name).suffixes[0][1:] in COMMON_AUDIO_EXTS
 
 def get_audio_as_wav_bytes(path):
-    import io
-
     ff_out = bytearray(subprocess.check_output(
         [
             'ffmpeg',
@@ -181,7 +180,7 @@ def get_audio_as_wav_bytes(path):
 
     return io.BytesIO(bytes(ff_out))
 
-def process(carrier_path, modulator_path, output_path, custom_frame_length, mode):
+def process(carrier_path, modulator_path, output_path, custom_frame_length, matcher_mode, video_mode, color_mode, min_cached_frames):
     if not carrier_path.is_file():
         raise FileNotFoundError(f"Carrier file {carrier_path} not found.")
     if not modulator_path.is_file():
@@ -191,6 +190,8 @@ def process(carrier_path, modulator_path, output_path, custom_frame_length, mode
     carrier_duration = float(get_duration(carrier_path))
     modulator_duration = float(get_duration(modulator_path))
 
+    video_in_mem = (video_mode == "mem_decay")
+
     if 'video' in carrier_type:
         output_is_audio = is_audio_filename(output_path)
         carrier_is_video = not output_is_audio
@@ -198,25 +199,27 @@ def process(carrier_path, modulator_path, output_path, custom_frame_length, mode
         logging.info("Calculating video length")
         
         carrier_framecount = float(get_framecount(carrier_path))
-        real_frame_length = carrier_duration / carrier_framecount
+        video_frame_length = carrier_duration / carrier_framecount
         if custom_frame_length is None:
-            frame_length = real_frame_length
+            frame_length = video_frame_length
         else:
             frame_length = float(custom_frame_length)
 
-        if not output_is_audio:
+        if not output_is_audio and not video_in_mem:
             logging.info("Separating video frames")
             frames_dir = TEMP_DIR / 'frames'
             frames_dir.mkdir()
-            subprocess.run(
-                [
+
+            call = video_out.apply_color_mode([
                     'ffmpeg',
-                    '-loglevel', 'error',
+                    '-v', 'quiet', '-stats',
                     '-i', str(carrier_path),
+                    'include_color_mode',
                     str(frames_dir / 'frame%06d.png')
-                ],
-                check=True
-            )
+            ],color_mode)
+            
+
+            subprocess.run(call,check=True)
 
     elif 'audio' in carrier_type:
         carrier_is_video = False
@@ -238,21 +241,28 @@ def process(carrier_path, modulator_path, output_path, custom_frame_length, mode
     _, modulator_audio = wavfile.read(get_audio_as_wav_bytes(modulator_path))
 
 
-    if mode == "basic":
+    logging.info("analyzing audio")
+    if matcher_mode == "basic":
         matcher = BasicAudioMatcher(carrier_audio, modulator_audio, INTERNAL_SAMPLERATE, frame_length)
-    elif mode == "combination":
+    elif matcher_mode == "combination":
         matcher = CombinedFrameAudioMatcher(carrier_audio, modulator_audio, INTERNAL_SAMPLERATE, frame_length)
-    elif mode == "unique":
+    elif matcher_mode == "unique":
         matcher = UniqueAudioMatcher(carrier_audio, modulator_audio, INTERNAL_SAMPLERATE, frame_length)
 
     logging.info("creating output audio")
     matcher.make_output_audio(TEMP_DIR / 'out.wav')
-    
 
     if carrier_is_video:
-        outframes_dir = TEMP_DIR / 'outframes'
-        outframes_dir.mkdir()
-        build_output_video(frames_dir, outframes_dir, matcher, real_frame_length, frame_length, carrier_framecount, output_path)
+        if video_mode == "mem_decay":
+            handler = VideoHandlerMem(carrier_path,output_path,TEMP_DIR,matcher,carrier_framecount,video_frame_length,color_mode)
+            handler.cache.decay = MEM_DECAY_MAX
+            handler.set_min_cached_frames(min_cached_frames)
+        elif video_mode == "disk":
+            handler = VideoHandlerDisk(carrier_path,output_path,TEMP_DIR,matcher,carrier_framecount,video_frame_length,color_mode)
+            outframes_dir = TEMP_DIR / 'outframes'
+            outframes_dir.mkdir()
+        
+        build_output_video(handler, matcher)
     else:
         subprocess.run(
             [
@@ -276,10 +286,18 @@ def main():
     parser.add_argument('modulator_path', type=Path, metavar='modulator_track', help='path to an audio or video file that will be reconstructed using the carrier track')
     parser.add_argument('output_path', type=Path, metavar='output_file', help='path to file that will be written to; should have an audio or video file extension (such as .wav, .mp3, .mp4, etc.)')
     parser.add_argument('--custom-frame-length', '-f', help='uses this number as frame length, in seconds. defaults to 0.04 seconds (1/25th of a second) for audio, or the real frame rate for video')
-    parser.add_argument('-m', '--mode', choices=('basic', 'combination', 'unique'), default='basic', help="""Which algorithm Stammer will use.
+    parser.add_argument('-vm', '--video_mode', choices=('disk', 'mem_decay'), default='disk', help='How STAMMER will store video frames internally.\
+                        disk: Copy all frames to temp directory.\
+                        mem_decay: Decode frames into memory as needed and deletes unused frames over time. Recommended for very large videos.')
+    parser.add_argument('-mcf', '--min_cached_frames', type=int, default=2, help='Only applies to "mem_decay" video mode. Minimum number of frames STAMMER will cache for one decayed frame.')
+    parser.add_argument('-c', '--color_mode', choices=('8fast', '8full', 'full'), default='full', help='Bitdepth of internal video frames.\
+                        8fast: generates 8-bit PNGs with default palette, fast and low filesize but low-quality. \
+                        8full: generates 8-bit PNGs with a custom 256-color palette for each frame. slow but looks great. \
+                        full: generates 16-bit PNGs, default. fast and looks good, but high filesize.')
+    parser.add_argument('-m', '--matcher_mode', choices=('basic', 'combination', 'unique'), default='basic', help="""Which algorithm Stammer will use.
         basic: replace each frame in the modulator with the most similar frame in the carrier.
-        combination: replace each frame in the modulator with a linear combination of several frames in the carrier, to more closely approximte it.
-        unique: limit each carrier frame to only appear once. If the carrier is longer than the modulator, some carrier frames will not be played, if it is shorter than the modulator, the modulator will be trimmed to thee length of the carrier.""")
+        combination: replace each frame in the modulator with a linear combination of several frames in the carrier, to more closely approximate it.
+        unique: limit each carrier frame to only appear once. If the carrier is longer than the modulator, some carrier frames will not be played, if it is shorter than the modulator, the modulator will be trimmed to the length of the carrier.""")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tempdir:
         global TEMP_DIR
