@@ -190,7 +190,7 @@ class VideoHandlerMem(VideoHandler):
         self.cache.clear(new_frame_ids)
         for idx in new_frame_ids:
             frame_slice = VideoHandlerMem.__get_frame_slice(decoded_frames,idx-min_f)
-            self.cache.set_frame(idx,frame_slice)
+            self.cache.set_item(idx,frame_slice)
     
     def get_frame(self,idx) -> io.BytesIO:
         super().get_frame(idx)
@@ -202,7 +202,7 @@ class VideoHandlerMem(VideoHandler):
         else:
             self.__cache_decayed_frames(idx)
         
-        frame = self.cache.array[idx].frame
+        frame = self.cache.items[idx].item
         return io.BytesIO(frame)
 
     def write_frame(self,idx,frame: io.BytesIO):
@@ -214,7 +214,7 @@ class VideoHandlerMem(VideoHandler):
     def get_progress_strings(self):
         strs = super().get_progress_strings()
         strs.append(f"{self.cache_hits} cache hits")
-        strs.append(f"{self.framecount-self.cache.decayed_frames}/{self.framecount} cached frames")
+        strs.append(f"{self.framecount-self.cache.decayed_items}/{self.framecount} cached frames")
         return strs
     
     def __create_output_proc(self):
@@ -234,4 +234,6 @@ class VideoHandlerMem(VideoHandler):
     
     def complete(self):
         super().complete()
+
+        # properly close ffmpeg
         self.out_proc.communicate()
