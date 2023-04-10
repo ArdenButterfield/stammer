@@ -107,7 +107,7 @@ def build_output_video(video_handler: VideoHandler, matcher):
         used_coeffs = [(j, coefficient) for j, coefficient in enumerate(basis_coefficients) if coefficient != 0]
         for k, coeff in used_coeffs:
             frame_num = min(match_row[k], video_handler.framecount - 1)
-            tiles.append(Image.open(video_handler.get_frame(frame_num+1)))
+            tiles.append(Image.open(video_handler.get_frame(frame_num)))
             hot_bits,_ = fraction_bits.as_array(coeff)
             bits.append(hot_bits)
         tesselation = image_tiling.Tiling(height=tiles[0].height,width=tiles[0].width)
@@ -133,7 +133,7 @@ def build_output_video(video_handler: VideoHandler, matcher):
     best_matches = matcher.get_best_matches()
 
     if type(matcher) in (BasicAudioMatcher, UniqueAudioMatcher):
-        for video_frame_i in range(int(len(best_matches) * audio_frame_length / video_frame_length)):
+        for video_frame_i in range(video_handler.best_match_count):
             elapsed_time = video_frame_i * video_frame_length
             audio_frame_i = int(elapsed_time / audio_frame_length)
             time_past_start_of_audio_frame = elapsed_time - (audio_frame_i * audio_frame_length)
@@ -141,11 +141,11 @@ def build_output_video(video_handler: VideoHandler, matcher):
             elapsed_time_in_carrier = match_num * audio_frame_length + time_past_start_of_audio_frame
             carrier_video_frame = int(elapsed_time_in_carrier / video_frame_length)
             carrier_video_frame = min(carrier_video_frame, int(video_handler.framecount - 1))
-            video_handler.write_frame(video_frame_i,video_handler.get_frame(carrier_video_frame+1))
+            video_handler.write_frame(video_frame_i,video_handler.get_frame(carrier_video_frame))
 
     elif type(matcher) == CombinedFrameAudioMatcher:
         basis_coefficients = matcher.get_basis_coefficients()
-        for video_frame_i in range(int(len(best_matches) * audio_frame_length / video_frame_length)):
+        for video_frame_i in range(video_handler.best_match_count):
             elapsed_time = video_frame_i * video_frame_length
             audio_frame_i = int(elapsed_time / audio_frame_length)
             time_past_start_of_audio_frame = elapsed_time - (audio_frame_i * audio_frame_length)
@@ -259,8 +259,6 @@ def process(carrier_path, modulator_path, output_path, custom_frame_length, matc
             handler.set_min_cached_frames(min_cached_frames)
         elif video_mode == "disk":
             handler = VideoHandlerDisk(carrier_path,output_path,TEMP_DIR,matcher,carrier_framecount,video_frame_length,color_mode)
-            outframes_dir = TEMP_DIR / 'outframes'
-            outframes_dir.mkdir()
         
         build_output_video(handler, matcher)
     else:
