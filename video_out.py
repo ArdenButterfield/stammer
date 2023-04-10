@@ -38,8 +38,18 @@ class VideoHandler:
         self.frames_written = 0
     
     def get_frame(self,idx):
-        assert(idx < self.framecount)
-
+        try:
+            assert(idx < self.framecount)
+        except AssertionError:
+            print("ERROR:")
+            print(f"STAMMER just tried to use carrier frame {idx}")
+            print(f"but carrier only has {self.framecount} frames.")
+            print()
+            print("This is a critical known issue with how carrier frames are handled.")
+            print("Please report STAMMER's output at this link:\nhttps://github.com/ArdenButterfield/stammer/issues/62")
+            print("\nQuitting.")
+            quit()
+    
     def write_frame(self):
         self.frames_written += 1
         self.print_progress()
