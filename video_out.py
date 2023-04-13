@@ -27,8 +27,7 @@ class VideoHandler:
         self.carrier_path = carrier_path
         self.output_path = output_path
         self.temp_dir = temp_dir
-        self.frames_dir = self.temp_dir / 'frames' 
-        self.outframes_dir = self.temp_dir / 'outframes'
+        self.frames_dir = self.temp_dir / 'frames'
 
         self.framecount = int(framecount)
         self.frame_length = frame_length
@@ -36,10 +35,21 @@ class VideoHandler:
         self.color_mode = color_mode
 
         self.frames_written = 0
+        self.out_proc = self.create_output_proc()
     
     def get_frame(self,idx):
-        assert(idx < self.framecount)
-
+        try:
+            assert(idx < self.framecount)
+        except AssertionError:
+            print("ERROR:")
+            print(f"STAMMER just tried to use carrier frame {idx}")
+            print(f"but carrier only has {self.framecount} frames.")
+            print()
+            print("This is a critical known issue with how carrier frames are handled.")
+            print("Please report STAMMER's output at this link:\nhttps://github.com/ArdenButterfield/stammer/issues/62")
+            print("\nQuitting.")
+            quit()
+    
     def write_frame(self):
         self.frames_written += 1
         self.print_progress()
@@ -61,54 +71,65 @@ class VideoHandler:
     def print_progress(self):
         print(self.progress_strings_separated(),end='      \r')
 
-def get_output_cmd(handler: VideoHandler,input):
-    cmd = [
-        'ffmpeg',
-        '-v', 'quiet',
-        '-y',
-        '-framerate', str(1.0/handler.frame_length),
-        '!inputs!',
-        '-c:a', 'aac',
-        '-c:v', 'libx264',
-        '-crf', '20',
-        '-pix_fmt', 'yuv420p',
-        '-shortest',
-        str(handler.output_path)
-    ]
+    def get_output_cmd(self,input = None):
+        if input == None:
+            input = [
+                '-f', 'image2pipe', '-i', 'pipe:',
+                '-i', str(self.temp_dir / 'out.wav')
+            ]
+        cmd = [
+            'ffmpeg',
+            '-v', 'quiet',
+            '-y',
+            '-framerate', str(1.0/self.frame_length),
+            '!inputs!',
+            '-c:a', 'aac',
+            '-c:v', 'libx264',
+            '-crf', '24',
+            '-pix_fmt', 'yuv420p',
+            '-shortest',
+            str(self.output_path)
+        ]
 
-    def replace(value, list):
-        idx = cmd.index(value)
-        cmd.pop(idx)
-        for i, x in enumerate(list): cmd.insert(idx+i,x)
+        def replace(value, list):
+            idx = cmd.index(value)
+            cmd.pop(idx)
+            for i, x in enumerate(list): cmd.insert(idx+i,x)
 
-    replace('!inputs!',input)
+        replace('!inputs!',input)
     
-    return cmd
+        return cmd
+    
+    def create_output_proc(self):
+        call = self.get_output_cmd()
+
+        return subprocess.Popen(
+            call,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL
+        )
+
 
 class VideoHandlerDisk(VideoHandler):
+    def __init__(self, *args):
+        super().__init__(*args)
+    
     def get_frame(self,idx):
         super().get_frame(idx)
-        f = open(self.frames_dir / f"frame{idx:06d}.png", 'rb')
-        return f
+        
+        # Video frame filenames start at 1, not 0
+        idx += 1
+        return open(self.frames_dir / f"frame{idx:06d}.png", 'rb')
 
     def write_frame(self,idx,frame: io.BytesIO):
         super().write_frame()
         frame.seek(0)
-        f = open(self.outframes_dir / f"frame{idx:06d}.png", 'wb')
-        f.write(frame.read())
-        f.close()
+        self.out_proc.stdin.write(frame.read())
     
     def complete(self):
         super().complete()
-        call = get_output_cmd(
-            self,
-            input=[
-                '-stats',
-                '-i', str(self.outframes_dir / 'frame%06d.png'),
-                '-i', str(self.temp_dir / 'out.wav')
-            ]
-        )
-        subprocess.run(call,check=True)
+
+        self.out_proc.communicate()
 
 
 PNG_MAGIC = int("89504e47",16).to_bytes(4,byteorder='big')
@@ -123,8 +144,6 @@ class VideoHandlerMem(VideoHandler):
         self.frame_length_max = self.frame_length / max(self.frame_length,self.matcher.frame_length)
         self.frames_backtrack = 0
         self.frames_lookahead = int(max(1.0/self.frame_length_max,2))
-        
-        self.out_proc = self.__create_output_proc()
 
     def set_min_cached_frames(self,mcf):
         # if a decayed frame is about to be used, we fetch the frame + this amount of frames around it
@@ -217,20 +236,6 @@ class VideoHandlerMem(VideoHandler):
         strs.append(f"{self.framecount-self.cache.decayed_items}/{self.framecount} cached frames")
         return strs
     
-    def __create_output_proc(self):
-        call = get_output_cmd(
-            self,
-            [
-                '-f', 'image2pipe', '-i', 'pipe:',
-                '-i', str(self.temp_dir / 'out.wav')
-            ]
-        )
-
-        return subprocess.Popen(
-            call,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL
-        )
     
     def complete(self):
         super().complete()
