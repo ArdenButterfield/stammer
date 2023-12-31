@@ -144,3 +144,6 @@ temp/
 *.mp3
 *.ogg
 *.opus
+
+!stammer2/testinput/*.wav
+.idea
