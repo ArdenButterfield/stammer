@@ -146,4 +146,5 @@ temp/
 *.opus
 
 !stammer2/testinput/*.wav
+!outputs/*.mp4
 .idea
