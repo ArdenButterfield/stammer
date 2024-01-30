@@ -16,7 +16,7 @@ import logging
 
 import image_tiling
 import fraction_bits
-from audio_matching import BasicAudioMatcher, CombinedFrameAudioMatcher, UniqueAudioMatcher
+from audio_matching import BasicAudioMatcher, CombinedFrameAudioMatcher, UniqueAudioMatcher, WeightedAudioMatcher
 import video_out
 from video_out import VideoHandler, VideoHandlerDisk, VideoHandlerMem
 
@@ -132,7 +132,7 @@ def build_output_video(video_handler: VideoHandler, matcher):
 
     best_matches = matcher.get_best_matches()
 
-    if type(matcher) in (BasicAudioMatcher, UniqueAudioMatcher):
+    if type(matcher) in (BasicAudioMatcher, UniqueAudioMatcher, WeightedAudioMatcher):
         for video_frame_i in range(video_handler.best_match_count):
             elapsed_time = video_frame_i * video_frame_length
             audio_frame_i = int(elapsed_time / audio_frame_length)
@@ -248,6 +248,8 @@ def process(carrier_path, modulator_path, output_path, custom_frame_length, matc
         matcher = CombinedFrameAudioMatcher(carrier_audio, modulator_audio, INTERNAL_SAMPLERATE, frame_length)
     elif matcher_mode == "unique":
         matcher = UniqueAudioMatcher(carrier_audio, modulator_audio, INTERNAL_SAMPLERATE, frame_length)
+    elif matcher_mode == "weighted":
+        matcher = WeightedAudioMatcher(carrier_audio, modulator_audio, INTERNAL_SAMPLERATE, frame_length)
 
     logging.info("creating output audio")
     matcher.make_output_audio(TEMP_DIR / 'out.wav')
@@ -292,10 +294,11 @@ def main():
                         8fast: generates 8-bit PNGs with default palette, fast and low filesize but low-quality. \
                         8full: generates 8-bit PNGs with a custom 256-color palette for each frame. slow but looks great. \
                         full: generates 16-bit PNGs, default. fast and looks good, but high filesize.')
-    parser.add_argument('-m', '--matcher_mode', choices=('basic', 'combination', 'unique'), default='basic', help="""Which algorithm Stammer will use.
+    parser.add_argument('-m', '--matcher_mode', choices=('basic', 'combination', 'unique', 'weighted'), default='basic', help="""Which algorithm Stammer will use.
         basic: replace each frame in the modulator with the most similar frame in the carrier.
         combination: replace each frame in the modulator with a linear combination of several frames in the carrier, to more closely approximate it.
-        unique: limit each carrier frame to only appear once. If the carrier is longer than the modulator, some carrier frames will not be played, if it is shorter than the modulator, the modulator will be trimmed to the length of the carrier.""")
+        unique: limit each carrier frame to only appear once. If the carrier is longer than the modulator, some carrier frames will not be played, if it is shorter than the modulator, the modulator will be trimmed to the length of the carrier.
+        weighted: apply an A-weighting curve to the audio spectra, to try and make formants more similar.""")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tempdir:
         global TEMP_DIR
