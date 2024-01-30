@@ -215,10 +215,17 @@ class WeightedAudioMatcher(BasicAudioMatcher):
         normalized_bands = spectra / vector_magnitudes[:,None]
     
         return normalized_bands
-
-    def best_match(self, modulator_band):
+    
+    def find_matches(self):
         freqs = np.fft.rfftfreq(2 * self.samples_per_frame, 1. / self.samplerate)[1:]
-        weights = self.r_a(freqs)
+        weights = self.a_weighting(freqs)
+        self.best_matches = []
+        inv_len = 1.0/len(self.modulator_bands)
+        for i in range(len(self.modulator_bands)):
+            self.best_matches.append(self.best_match(self.modulator_bands[i], weights))
+            self.print_progress(inv_len,i)
+
+    def best_match(self, modulator_band, weights):
         dot_products = np.sum(weights * (self.carrier_bands * modulator_band), axis=1)
         best = np.argmax(dot_products)
         return best
