@@ -36,8 +36,8 @@ class AudioMatcher:
         return frames
 
     def make_normalized_bands(self, frames_input):
-        transforms = np.fft.fft(frames_input)
-        spectra = abs(transforms[:,1:len(transforms[0])//2])
+        transforms = np.fft.rfft(frames_input)
+        spectra = abs(transforms[:,1:])
         split_points = [0]
         i = 2
         while i < len(spectra[0]):
@@ -196,3 +196,29 @@ class UniqueAudioMatcher(BasicAudioMatcher):
 
         row_ind, col_ind = linear_sum_assignment(cost_matrix, maximize=True)
         self.best_matches = col_ind
+
+class WeightedAudioMatcher(BasicAudioMatcher):
+    def r_a(self, f):
+        return (12194**2 * f**4) / (
+            (f**2 + 20.6**2) * np.sqrt((f**2 + 107.7**2) * (f**2 + 737.9**2)) * (f**2 + 12194 ** 2)
+        )
+    
+    def a_weighting(self, f):
+        return self.r_a(f) / self.r_a(1000)
+
+    def make_normalized_bands(self, frames_input):
+        transforms = np.fft.rfft(frames_input)
+        spectra = abs(transforms[:, 1:])
+
+        vector_magnitudes = np.sqrt((spectra * spectra).sum(axis=1))
+        vector_magnitudes[vector_magnitudes==0]=1
+        normalized_bands = spectra / vector_magnitudes[:,None]
+    
+        return normalized_bands
+
+    def best_match(self, modulator_band):
+        freqs = np.fft.rfftfreq(2 * self.samples_per_frame, 1. / self.samplerate)[1:]
+        weights = self.r_a(freqs)
+        dot_products = np.sum(weights * (self.carrier_bands * modulator_band), axis=1)
+        best = np.argmax(dot_products)
+        return best
